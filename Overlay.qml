@@ -832,6 +832,10 @@ Item {
                 Text {
                   id: measure
                   visible: false
+                  // Plain text on purpose. Qt's default AutoText parser can
+                  // treat a message as HTML and start an image download while
+                  // it measures the width, even when this line is hidden.
+                  textFormat: Text.PlainText
                   text: body
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.body
