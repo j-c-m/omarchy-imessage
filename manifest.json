@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.nikolaos-gkionis.messages",
+  "name": "iMsg",
+  "version": "1.0.0",
+  "author": "nikolaos",
+  "license": "MIT",
+  "description": "Read and send iPhone texts over Bluetooth from a terminal-style overlay.",
+  "repository": "https://github.com/Nikolaos-Gkionis/omarchy-imessage",
+  "kinds": ["service", "overlay", "bar-widget"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "overlay": "Overlay.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "iMsg",
+    "description": "Unread iPhone texts",
+    "category": "Communication",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
