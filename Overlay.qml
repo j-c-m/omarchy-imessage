@@ -17,6 +17,9 @@ Item {
   property var manifest: null
 
   property bool opened: false
+  // True only while the card is on screen and should receive keys.
+  // The grab is dropped before the window hides. See dismiss().
+  property bool holdingKeys: false
   property string screen: "setup"
   property int selected: 0
   property string filterText: ""
@@ -50,7 +53,9 @@ Item {
   property color background: Color.menu.background
   property color foreground: Color.menu.text
   property color border: Color.menu.border
-  property var borderSpec: Border.surfaceSpec("menu", "border", border, Math.max(1, Style.space(2)))
+  // One quiet pixel around the card. Theme border widths are not used,
+  // so the edge stays a hairline on every theme.
+  property var borderSpec: Border.flat(Util.alpha(foreground, 0.35), 1)
   property color scrim: Color.menu.scrim
   property color selectedBackground: Color.accent
   property color selectedText: Color.background
@@ -65,6 +70,7 @@ Item {
 
   function open(payloadJson) {
     root.opened = true
+    root.holdingKeys = true
     root.helpOn = false
     root.composeFocus = false
     root.toAddress = ""
@@ -81,13 +87,64 @@ Item {
   }
 
   function close() {
-    root.opened = false
+    // Drop the keyboard grab in this frame. The window itself hides on
+    // the next frame, so the compositor never unmaps a surface that
+    // still owns every key. That unmap is what froze the session.
+    root.holdingKeys = false
+    root.composeFocus = false
+    if (root.opened)
+      Qt.callLater(function() { root.opened = false })
   }
 
   function dismiss() {
+    var pluginId = (root.manifest && root.manifest.id) || "io.github.nikolaos-gkionis.messages"
     root.close()
-    if (root.shell && typeof root.shell.hide === "function")
-      root.shell.hide((root.manifest && root.manifest.id) || "io.github.nikolaos-gkionis.messages")
+    Qt.callLater(function() {
+      if (root.shell && typeof root.shell.hide === "function")
+        root.shell.hide(pluginId)
+    })
+  }
+
+  // Escape walks back one step, then closes. One function, so the
+  // window shortcut and the key handler cannot disagree. The guard
+  // ignores a second call from the same key press.
+  property bool stepping: false
+  function stepBack() {
+    if (root.stepping)
+      return
+    root.stepping = true
+    Qt.callLater(function() { root.stepping = false })
+    if (root.helpOn) {
+      root.helpOn = false
+      return
+    }
+    if (root.screen === "emoji") {
+      root.screen = "inbox"
+      root.composeFocus = true
+      return
+    }
+    if (root.composeFocus) {
+      root.cancelCompose()
+      return
+    }
+    if (root.filterText) {
+      root.filterText = ""
+      return
+    }
+    if (root.screen === "contacts") {
+      root.screen = "inbox"
+      return
+    }
+    if (root.screen === "code") {
+      if (root.svc)
+        root.svc.cancelPair()
+      return
+    }
+    if (root.screen === "checklist" && root.svc && root.svc.threads.count > 0) {
+      root.screen = "inbox"
+      return
+    }
+    root.dismiss()
   }
 
   function followState(initial) {
@@ -540,8 +597,24 @@ Item {
     color: "transparent"
     WlrLayershell.namespace: "nikolaos-messages"
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    // None whenever the card is closing or already hidden. Exclusive
+    // while a hidden keepLoaded window exists is what ate Escape and
+    // locked the keyboard for the rest of the desktop.
+    WlrLayershell.keyboardFocus: root.holdingKeys ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
     exclusionMode: ExclusionMode.Ignore
+    onVisibleChanged: {
+      if (visible)
+        keyCatcher.forceActiveFocus()
+    }
+
+    // Window-level, so Escape still arrives when no list row has focus.
+    // The text field used to swallow it, and the card never closed.
+    Shortcut {
+      enabled: root.opened
+      sequence: "Escape"
+      context: Qt.WindowShortcut
+      onActivated: root.stepBack()
+    }
 
     Rectangle {
       anchors.fill: parent
@@ -596,10 +669,8 @@ Item {
               event.accepted = true
               return
             }
-            if (event.key === Qt.Key_Escape) {
-              root.cancelCompose()
-              event.accepted = true
-            }
+            // Escape is handled by the window shortcut above, so a
+            // reply in progress cannot swallow the key.
           }
         }
 
@@ -613,17 +684,7 @@ Item {
           }
 
           if (event.key === Qt.Key_Escape) {
-            if (root.helpOn) root.helpOn = false
-            else if (root.screen === "emoji") {
-              root.screen = "inbox"
-              root.composeFocus = true
-            }
-            else if (root.composeFocus) root.cancelCompose()
-            else if (root.filterText) root.filterText = ""
-            else if (root.screen === "contacts") root.screen = "inbox"
-            else if (root.screen === "code") root.svc && root.svc.cancelPair()
-            else if (root.screen === "checklist" && root.svc && root.svc.threads.count > 0) root.screen = "inbox"
-            else root.dismiss()
+            root.stepBack()
             event.accepted = true
             return
           }
