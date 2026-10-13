@@ -235,7 +235,7 @@ class Store:
     ) -> tuple[dict, bool]:
         """Insert or update one text. Returns the row and whether it was new."""
         own = self.settings()["ownNumber"]
-        key = thread_key(address, own)
+        direct = thread_key(address, own)
         label = peer_label or self.label_for(address) or ""
         if not label or label == address:
             earlier = self._db.execute(
@@ -244,12 +244,14 @@ class Store:
                 WHERE thread_key = ? AND peer_label != '' AND peer_label != ?
                 ORDER BY id LIMIT 1
                 """,
-                (key, address),
+                (direct, address),
             ).fetchone()
             if earlier:
                 label = earlier["peer_label"]
         if not label:
             label = address
+        # A phone and an email on the same contact are one conversation.
+        key = self.conversation_key(address, label)
         existing = self._db.execute(
             "SELECT id, read, body_complete, thread_key, direction FROM messages WHERE external_id = ?",
             (external_id,),
@@ -324,7 +326,64 @@ class Store:
             "bodyComplete": bool(row["body_complete"]),
         }
 
+    def conversation_key(self, address: str, label: str) -> str:
+        """Thread key for an address. An email joins that person's phone thread."""
+        own = self.settings()["ownNumber"]
+        direct = thread_key(address, own)
+        if direct.startswith("tel:"):
+            return direct
+        name = (label or "").strip()
+        if not name or name == address:
+            looked = self.label_for(address)
+            if looked and looked != address:
+                name = looked
+        if not name or name == address:
+            return direct
+        existing = self._db.execute(
+            """
+            SELECT thread_key FROM messages
+            WHERE lower(peer_label) = lower(?) AND thread_key LIKE 'tel:%'
+            GROUP BY thread_key
+            ORDER BY COUNT(*) DESC, MIN(id) ASC
+            LIMIT 1
+            """,
+            (name,),
+        ).fetchone()
+        if existing:
+            return str(existing["thread_key"])
+        phones = self._db.execute(
+            "SELECT address FROM contacts WHERE lower(name) = lower(?) AND kind = 'tel'",
+            (name,),
+        ).fetchall()
+        tels = []
+        for phone in phones:
+            key = thread_key(str(phone["address"]), own)
+            if key.startswith("tel:") and key not in tels:
+                tels.append(key)
+        if len(tels) == 1:
+            return tels[0]
+        return direct
+
+    def fold_same_person(self) -> int:
+        """Move an email conversation onto that person's phone conversation."""
+        changed = 0
+        rows = self._db.execute(
+            "SELECT id, thread_key, peer_label FROM messages WHERE thread_key LIKE 'email:%'"
+        ).fetchall()
+        for row in rows:
+            target = self.conversation_key(address_from_thread(row["thread_key"]), row["peer_label"])
+            if target.startswith("tel:") and target != row["thread_key"]:
+                self._db.execute(
+                    "UPDATE messages SET thread_key = ? WHERE id = ?",
+                    (target, row["id"]),
+                )
+                changed += 1
+        if changed:
+            self._db.commit()
+        return changed
+
     def threads(self) -> list[dict]:
+        self.fold_same_person()
         rows = self._db.execute(
             """
             SELECT m.thread_key, m.peer_label, m.body, m.has_attachment, m.timestamp,

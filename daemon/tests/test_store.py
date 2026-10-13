@@ -161,6 +161,54 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.db.apply_contact_names(), 1)
         self.assertEqual(self.db.threads()[0]["label"], "Sam")
 
+    def test_an_email_joins_that_persons_phone_conversation(self):
+        self.db.replace_contacts(
+            [
+                {"name": "Quinn", "address": "+15551110000", "kind": "tel"},
+                {"name": "Quinn", "address": "quinn@example.com", "kind": "email"},
+                {"name": "Ada", "address": "ada@example.com", "kind": "email"},
+            ]
+        )
+        self.db.upsert_message(
+            external_id="phone-1",
+            address="+15551110000",
+            body="from the phone",
+            direction="in",
+            timestamp="2026-10-02T11:00:00",
+            read=True,
+            has_attachment=False,
+            body_complete=True,
+            peer_label="Quinn",
+        )
+        self.db.upsert_message(
+            external_id="mail-1",
+            address="quinn@example.com",
+            body="from email",
+            direction="in",
+            timestamp="2026-10-02T11:05:00",
+            read=True,
+            has_attachment=False,
+            body_complete=True,
+            peer_label="Quinn",
+        )
+        self.db.upsert_message(
+            external_id="ada-1",
+            address="ada@example.com",
+            body="only email",
+            direction="in",
+            timestamp="2026-10-02T11:06:00",
+            read=True,
+            has_attachment=False,
+            body_complete=True,
+            peer_label="Ada",
+        )
+        labels = [row["label"] for row in self.db.threads()]
+        self.assertEqual(labels, ["Ada", "Quinn"])
+        quinn = self.db.threads()[1]
+        self.assertTrue(quinn["key"].startswith("tel:"))
+        bodies = [row["body"] for row in self.db.messages_for(quinn["key"])]
+        self.assertEqual(bodies, ["from the phone", "from email"])
+
     def test_a_later_address_replaces_a_name_only_thread(self):
         self.db.upsert_message(
             external_id="map-raw",
