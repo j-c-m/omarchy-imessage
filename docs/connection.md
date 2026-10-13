@@ -37,7 +37,7 @@ iOS does not publish MAP until the radio link is up. Before `CreateSession`, the
 
 If MAP still fails because the service record is missing, the phone refused the channel, or it has not allowed access, the program brings the link up once more and tries `CreateSession` again.
 
-A saved phone is reopened the same way when the daemon starts, so the bar can receive texts while the card is closed.
+A saved phone is reopened the same way when the daemon starts, so the bar can receive texts while the card is closed. If the link drops later, the card stops saying connected and tries again about twice a minute.
 
 The ANCS advertisement stops when messages connect. If they are still down after 120 seconds, the advertisement stops. A new pair cancels the previous timer.
 

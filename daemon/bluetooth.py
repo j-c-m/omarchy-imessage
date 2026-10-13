@@ -234,6 +234,9 @@ class BluetoothSession:
         self._announce_live = False
         self._listening = False
         self._contacts_watching = False
+        self._link_ticks = 0
+        self._last_link_try = 0.0
+        self._reconnecting = False
         # These must stay referenced. If Python collects them, new-text
         # alerts from the phone are silently dropped.
         self._obex_root = None
@@ -270,12 +273,18 @@ class BluetoothSession:
         await self._safe_reconnect()
 
     async def _safe_reconnect(self) -> None:
+        if self._reconnecting:
+            return
+        self._reconnecting = True
+        self._last_link_try = time.monotonic()
         try:
             async with self.lock:
                 await self._connect_saved()
         except Exception as exc:
             self.detail = public_error(exc)
             self.push_status()
+        finally:
+            self._reconnecting = False
 
     def push_status(self) -> None:
         settings = self.store.settings()
@@ -957,6 +966,13 @@ class BluetoothSession:
         """
         while self._session_bus:
             await asyncio.sleep(2)
+            self._link_ticks += 1
+            if self._link_ticks >= 8:
+                self._link_ticks = 0
+                try:
+                    await self._check_link()
+                except Exception:
+                    pass
             if not self._map_path:
                 continue
             try:
@@ -1078,6 +1094,40 @@ class BluetoothSession:
                 }
             )
         return found
+
+    async def _map_alive(self) -> bool:
+        """True when the message session is still on the bus."""
+        if not self._map_path or not self._session_bus:
+            return False
+        try:
+            await self._session_bus.introspect("org.bluez.obex", self._map_path)
+            return True
+        except Exception:
+            return False
+
+    async def _check_link(self) -> None:
+        """Drop a stale "connected" state and try the phone again.
+
+        The message session can die overnight while the card still says
+        connected. A dead session is cleared at once. A new attempt waits
+        half a minute so an absent phone is not dialed continuously.
+        """
+        if self._reconnecting or self.state in ("pairing", "scanning"):
+            return
+        if not self.store.settings()["phoneAddress"]:
+            return
+        radio = await self._link_up(self.store.settings()["phoneAddress"])
+        if radio and await self._map_alive():
+            return
+        if self.state == "connected" or self._map_path or self._pbap_path:
+            async with self.lock:
+                await self._close_profiles()
+                self.state = "phone_nearby"
+                self.detail = "The paired phone is not connected."
+                self.push_status()
+        if time.monotonic() - self._last_link_try < 30:
+            return
+        self._track(self._safe_reconnect())
 
     async def _refresh_presence(self) -> None:
         settings = self.store.settings()
