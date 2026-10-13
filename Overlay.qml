@@ -324,10 +324,14 @@ Item {
     if (root.selected < 0 || root.selected >= shownModel.count)
       return
     var row = shownModel.get(root.selected)
-    if (!row || !row.key || row.key === root.lastOpened)
+    if (!row || !row.key)
       return
+    // The card can already be on this conversation when a new text arrives.
+    // Loading is skipped then, but the text still has to be marked read.
+    var same = row.key === root.lastOpened
     root.lastOpened = row.key
-    root.svc.loadMessages(row.key)
+    if (!same)
+      root.svc.loadMessages(row.key)
     root.svc.markRead(row.key)
   }
 
@@ -745,6 +749,10 @@ Item {
     ignoreUnknownSignals: true
     function onStateChanged() { if (root.opened) root.followState(false) }
     function onPairCodeChanged() { if (root.opened && root.svc && root.svc.pairCode) root.screen = "code" }
+    function onMessageRevisionChanged() {
+      if (root.opened && root.screen === "inbox" && root.lastOpened && root.svc)
+        root.svc.markRead(root.lastOpened)
+    }
     function onThreadRevisionChanged() {
       if (root.screen !== "inbox")
         return
