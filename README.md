@@ -40,7 +40,7 @@ While you are developing this checkout, link it and enable that id. `omarchy plu
 python3 -m tui
 ```
 
-Install `python-textual` first. `--standalone` starts a daemon when the plugin is not running. Do not use it while the plugin's daemon is already connected to the phone. A click on the bar button, or on a notification, opens this program. A notification for a conversation opens that conversation. The Qt card is still in the tree, but those clicks no longer show it. Restart the shell once after updating so the running shell and daemon use this path.
+Install `python-textual` first. `--standalone` starts a daemon when the plugin is not running. Do not use it while the plugin's daemon is already connected to the phone. A click on the bar button, or on a notification, opens this program. If it is already open, that window is focused. A notification for a conversation opens that conversation. The Qt card is still in the tree, but those clicks no longer show it. Restart the shell once after updating so the running shell and daemon use this path.
 
 ```sh
 omarchy plugin validate .

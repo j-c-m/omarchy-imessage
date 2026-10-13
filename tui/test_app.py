@@ -146,6 +146,31 @@ class OpenTests(unittest.IsolatedAsyncioTestCase):
         marked = [item for item in client.sent if item["cmd"] == "mark-read"]
         self.assertEqual(marked[-1]["thread"], "tel:+15550002222")
 
+    async def test_a_summon_focuses_this_screen_and_opens_the_conversation(self):
+        from tui import instance
+
+        focused: list[bool] = []
+        original = instance.focus_this_window
+        instance.focus_this_window = lambda: focused.append(True)
+        client = QueueClient()
+        app = ImsgApp(client=client)
+        try:
+            async with app.run_test(size=(100, 24)) as pilot:
+                await client.push({
+                    "event": "threads",
+                    "threads": [
+                        {"key": "tel:+15550001111", "label": "Ada", "unread": 0, "preview": "hi"},
+                        {"key": "tel:+15550002222", "label": "Bo", "unread": 1, "preview": "yo"},
+                    ],
+                })
+                await pilot.pause()
+                app.summon("tel:+15550002222")
+                await pilot.pause()
+                self.assertEqual(app.open_key, "tel:+15550002222")
+                self.assertEqual(focused, [True])
+        finally:
+            instance.focus_this_window = original
+
     async def test_t_toggles_notification_text(self):
         client = QueueClient()
         app = ImsgApp(client=client)

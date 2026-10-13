@@ -39,8 +39,7 @@ Item {
   }
 
   function launchTui(thread) {
-    var terminal = (root.omarchyPath || "/usr/share/omarchy") + "/bin/omarchy-launch-terminal"
-    var args = [terminal, root.fileUrl("bin/imsg-tui")]
+    var args = [root.fileUrl("bin/imsg-tui")]
     if (thread)
       args.push("--thread", String(thread))
     Quickshell.execDetached(args)

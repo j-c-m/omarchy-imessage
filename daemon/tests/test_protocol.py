@@ -202,7 +202,6 @@ class NotificationTests(unittest.TestCase):
         self.assertEqual(args[5], "hello")
         self.assertEqual(args[6:], [
             "--exec",
-            "omarchy-launch-terminal",
             protocol.tui_launcher(),
             "--thread",
             "tel:+15550001111",
@@ -211,7 +210,7 @@ class NotificationTests(unittest.TestCase):
     def test_left_click_opens_the_tui_without_a_thread(self):
         args = protocol.notification_command("New message", "", "")
         self.assertNotIn("", args)
-        self.assertEqual(args[-3:], ["--exec", "omarchy-launch-terminal", protocol.tui_launcher()])
+        self.assertEqual(args[-2:], ["--exec", protocol.tui_launcher()])
 
 
 if __name__ == "__main__":

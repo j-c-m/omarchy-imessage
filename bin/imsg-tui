@@ -1,5 +1,10 @@
 #!/bin/sh
 # Start the iMsg terminal screen from this checkout.
+# A second run focuses the screen that is already open.
 root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd) || exit 1
 cd "$root" || exit 1
-exec python3 -m tui "$@"
+if [ "${1:-}" = "--inside" ]; then
+  shift
+  exec python3 -m tui "$@"
+fi
+exec python3 -m tui --launch "$@"

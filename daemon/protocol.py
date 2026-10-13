@@ -438,7 +438,7 @@ def notification_command(title: str, body: str, thread: str, program: str = "oma
     text = (body or "").strip()
     if text:
         args.append(text[:120])
-    args.extend(["--exec", "omarchy-launch-terminal", tui_launcher()])
+    args.extend(["--exec", tui_launcher()])
     if thread:
         args.extend(["--thread", thread])
     return args

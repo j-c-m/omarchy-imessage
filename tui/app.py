@@ -8,6 +8,9 @@ The plugin's messages daemon owns the phone. This program only draws.
 
 from __future__ import annotations
 
+import asyncio
+import json
+import socket
 import sys
 
 from rich.text import Text
@@ -136,7 +139,13 @@ class ImsgApp(App):
         Binding("y", "accept_pair", "yes"),
     ]
 
-    def __init__(self, client=None, standalone: bool = False, thread: str = "") -> None:
+    def __init__(
+        self,
+        client=None,
+        standalone: bool = False,
+        thread: str = "",
+        summon_sock: socket.socket | None = None,
+    ) -> None:
         super().__init__(ansi_color=True)
         # ansi-dark uses the terminal's 16 colors, not a fixed hex palette.
         self.theme = "ansi-dark"
@@ -148,6 +157,7 @@ class ImsgApp(App):
         self.mode = "threads"
         self.open_key = ""
         self.launch_thread = thread
+        self._summon_sock = summon_sock
         self.compose_address = ""
         self.filter_text = ""
         self.filter_on = False
@@ -175,7 +185,68 @@ class ImsgApp(App):
         box.display = False
         box.can_focus = False
         self.query_one("#threads", ThreadList).focus()
+        if self._summon_sock is not None:
+            self.run_worker(self._accept_summons(), group="summon", exclusive=True, exit_on_error=False)
         self.run_worker(self._pump(), exclusive=True)
+
+    def on_unmount(self) -> None:
+        from tui.instance import release
+
+        release(self._summon_sock)
+        self._summon_sock = None
+
+    async def _accept_summons(self) -> None:
+        sock = self._summon_sock
+        if sock is None:
+            return
+        loop = asyncio.get_running_loop()
+        while True:
+            client, _addr = await loop.sock_accept(sock)
+            try:
+                await self._take_summon(client)
+            finally:
+                client.close()
+
+    async def _take_summon(self, client: socket.socket) -> None:
+        loop = asyncio.get_running_loop()
+        data = b""
+        while b"\n" not in data and len(data) < 4096:
+            chunk = await loop.sock_recv(client, 1024)
+            if not chunk:
+                break
+            data += chunk
+        thread = ""
+        try:
+            payload = json.loads(data.decode("utf-8", errors="replace").strip() or "{}")
+            thread = str(payload.get("thread") or "")
+        except json.JSONDecodeError:
+            thread = ""
+        self.summon(thread)
+        try:
+            await loop.sock_sendall(client, b'{"ok":true}\n')
+        except OSError:
+            pass
+
+    def summon(self, thread: str) -> None:
+        """Bring this screen forward. Open `thread` when a conversation was named."""
+        from tui.instance import focus_this_window
+
+        if thread:
+            self.launch_thread = thread
+            self.mode = "threads"
+            composer = self.query_one("#composer", Composer)
+            if composer.display:
+                self.action_close_compose()
+            if self.filter_on:
+                self.filter_on = False
+                self.filter_text = ""
+                box = self.query_one("#filter", Input)
+                box.display = False
+                box.can_focus = False
+                box.value = ""
+            self._show_threads()
+        self.query_one("#threads", ThreadList).focus()
+        focus_this_window()
 
     async def _pump(self) -> None:
         if self.client is None:
@@ -510,15 +581,31 @@ def render_message(message: dict, width: int = 0) -> Text:
     return aligned
 
 
+def _thread_arg(args: list[str]) -> str:
+    if "--thread" not in args:
+        return ""
+    index = args.index("--thread")
+    if index + 1 >= len(args):
+        return ""
+    return args[index + 1]
+
+
 def main(argv: list[str] | None = None) -> None:
+    from tui.instance import claim, exec_in_terminal, hand_off
+
     args = list(sys.argv[1:] if argv is None else argv)
+    launch = "--launch" in args
     standalone = "--standalone" in args
-    thread = ""
-    if "--thread" in args:
-        index = args.index("--thread")
-        if index + 1 < len(args):
-            thread = args[index + 1]
-    app = ImsgApp(standalone=standalone, thread=thread)
+    thread = _thread_arg(args)
+    if launch:
+        # Outside a terminal. Focus the open screen, or start one.
+        if hand_off(thread):
+            return
+        exec_in_terminal(thread, standalone)
+    sock = claim(thread)
+    if sock is None:
+        return
+    app = ImsgApp(standalone=standalone, thread=thread, summon_sock=sock)
     app.run()
 
 
