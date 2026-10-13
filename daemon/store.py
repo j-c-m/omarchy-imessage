@@ -102,6 +102,20 @@ class Store:
     def set_own_number(self, number: str) -> None:
         self._db.execute("UPDATE settings SET own_number = ? WHERE id = 1", (number,))
         self._db.commit()
+        self._rethread(number)
+
+    def _rethread(self, own: str) -> None:
+        """Move a raw key onto a phone or email key once the country code is known."""
+        rows = self._db.execute("SELECT id, thread_key FROM messages").fetchall()
+        for row in rows:
+            key = row["thread_key"]
+            if not key.startswith("raw:"):
+                continue
+            new_key = thread_key(key[4:], own)
+            if new_key == key or not (new_key.startswith("tel:") or new_key.startswith("email:")):
+                continue
+            self._db.execute("UPDATE messages SET thread_key = ? WHERE id = ?", (new_key, row["id"]))
+        self._db.commit()
 
     def set_phone(self, address: str, name: str) -> None:
         self._db.execute(
@@ -235,7 +249,7 @@ class Store:
         if not label:
             label = address
         existing = self._db.execute(
-            "SELECT id, read, body_complete FROM messages WHERE external_id = ?",
+            "SELECT id, read, body_complete, thread_key, direction FROM messages WHERE external_id = ?",
             (external_id,),
         ).fetchone()
         if existing:
@@ -243,23 +257,29 @@ class Store:
             next_read = 1 if existing["read"] or read else 0
             next_complete = 1 if existing["body_complete"] or body_complete else 0
             next_body = body if body_complete or not existing["body_complete"] else None
+            next_key = key if key.startswith("tel:") or key.startswith("email:") else existing["thread_key"]
+            # A preview can file the text under a name. The downloaded body
+            # carries the real address and the real direction.
+            next_direction = direction if body_complete and not existing["body_complete"] else existing["direction"]
             if next_body is None:
                 self._db.execute(
                     """
                     UPDATE messages
-                    SET read = ?, has_attachment = ?, body_complete = ?, peer_label = ?
+                    SET read = ?, has_attachment = ?, body_complete = ?, peer_label = ?,
+                        thread_key = ?, direction = ?
                     WHERE id = ?
                     """,
-                    (next_read, 1 if has_attachment else 0, next_complete, label, existing["id"]),
+                    (next_read, 1 if has_attachment else 0, next_complete, label, next_key, next_direction, existing["id"]),
                 )
             else:
                 self._db.execute(
                     """
                     UPDATE messages
-                    SET body = ?, read = ?, has_attachment = ?, body_complete = ?, peer_label = ?
+                    SET body = ?, read = ?, has_attachment = ?, body_complete = ?, peer_label = ?,
+                        thread_key = ?, direction = ?
                     WHERE id = ?
                     """,
-                    (body, next_read, 1 if has_attachment else 0, next_complete, label, existing["id"]),
+                    (body, next_read, 1 if has_attachment else 0, next_complete, label, next_key, next_direction, existing["id"]),
                 )
             self._db.commit()
             return self._message_by_id(existing["id"]), False
@@ -312,10 +332,15 @@ class Store:
                    ) AS unread
             FROM messages m
             JOIN (
-              SELECT thread_key, MAX(timestamp) AS timestamp
-              FROM messages GROUP BY thread_key
-            ) latest ON latest.thread_key = m.thread_key AND latest.timestamp = m.timestamp
-            ORDER BY unread DESC, m.timestamp DESC
+              SELECT thread_key, MAX(id) AS id
+              FROM messages
+              WHERE (thread_key, timestamp) IN (
+                SELECT thread_key, MAX(timestamp) AS timestamp
+                FROM messages GROUP BY thread_key
+              )
+              GROUP BY thread_key
+            ) latest ON latest.id = m.id
+            ORDER BY unread DESC, m.timestamp DESC, m.id DESC
             """
         ).fetchall()
         seen = set()

@@ -145,6 +145,84 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.db.apply_contact_names(), 1)
         self.assertEqual(self.db.threads()[0]["label"], "Sam")
 
+    def test_a_later_address_replaces_a_name_only_thread(self):
+        self.db.upsert_message(
+            external_id="map-raw",
+            address="Ada",
+            body="preview",
+            direction="out",
+            timestamp="2026-10-02T10:00:00",
+            read=False,
+            has_attachment=False,
+            body_complete=False,
+            peer_label="Ada",
+        )
+        row, is_new = self.db.upsert_message(
+            external_id="map-raw",
+            address="+15551234567",
+            body="hello",
+            direction="in",
+            timestamp="2026-10-02T10:00:00",
+            read=False,
+            has_attachment=False,
+            body_complete=True,
+            peer_label="Ada",
+        )
+        self.assertFalse(is_new)
+        self.assertEqual(row["thread"], "tel:+15551234567")
+        self.assertEqual(row["direction"], "in")
+        again, _ = self.db.upsert_message(
+            external_id="map-raw",
+            address="+15551234567",
+            body="hello",
+            direction="out",
+            timestamp="2026-10-02T10:00:00",
+            read=False,
+            has_attachment=False,
+            body_complete=True,
+            peer_label="Ada",
+        )
+        self.assertEqual(again["direction"], "in")
+
+    def test_own_number_fills_in_a_national_thread(self):
+        self.db.upsert_message(
+            external_id="map-nat",
+            address="5551234567",
+            body="hi",
+            direction="in",
+            timestamp="2026-10-02T10:00:00",
+            read=True,
+            has_attachment=False,
+            body_complete=True,
+        )
+        self.assertTrue(self.db.threads()[0]["key"].startswith("raw:"))
+        self.db.set_own_number("+15550001111")
+        self.assertEqual(self.db.threads()[0]["key"], "tel:+15551234567")
+
+    def test_same_second_preview_is_the_later_text(self):
+        stamp = "2026-10-02T10:00:00"
+        self.db.upsert_message(
+            external_id="early",
+            address="+15551110000",
+            body="earlier",
+            direction="in",
+            timestamp=stamp,
+            read=True,
+            has_attachment=False,
+            body_complete=True,
+        )
+        self.db.upsert_message(
+            external_id="late",
+            address="+15551110000",
+            body="later",
+            direction="in",
+            timestamp=stamp,
+            read=True,
+            has_attachment=False,
+            body_complete=True,
+        )
+        self.assertEqual(self.db.threads()[0]["preview"], "later")
+
 
 if __name__ == "__main__":
     unittest.main()

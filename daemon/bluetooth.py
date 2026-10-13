@@ -34,6 +34,7 @@ from protocol import (
     parse_vcards,
     present_message,
     public_error,
+    thread_key,
 )
 from store import Store, runtime_dir
 
@@ -665,6 +666,10 @@ class BluetoothSession:
         # A brand-new text often arrives with no sender yet. The download
         # step fills that in. Skipping here would drop the text.
         if not sender:
+            return None
+        # A display name is not a sendable address. The download inserts the
+        # row once the bMessage has a phone number or an email.
+        if not thread_key(sender, self.store.settings()["ownNumber"]).startswith(("tel:", "email:")):
             return None
         sender_name = str(fields.get("Sender") or "")
         # A phone number is not a display name. Leave the label empty so the
