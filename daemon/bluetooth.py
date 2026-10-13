@@ -29,6 +29,7 @@ from protocol import (
     audio_profile_uuids,
     classify_recipient,
     coerce_phone,
+    connected_status,
     dominant_calling_code,
     extract_bmessage_peer,
     extract_bmessage_text,
@@ -624,12 +625,9 @@ class BluetoothSession:
             await self._pull_contacts()
         except Exception:
             # Contacts are optional. Texts still work when Sync Contacts is off.
-            self.detail = "iMsg is connected. Turn on Sync Contacts to pick people by name."
+            pass
         self.state = "connected"
-        if not self.detail.startswith("iMsg is connected"):
-            # iOS sends an empty inbox on purpose. Show Notifications shares
-            # texts that arrive from now on. It does not copy old conversations.
-            self.detail = "Connected. New texts show up here. Older ones stay on the iPhone."
+        self.detail = connected_status(self.store.settings()["phoneName"])
         self._announce_live = True
         await self._stop_advert()
         await self._drop_audio(address)
@@ -1145,8 +1143,10 @@ class BluetoothSession:
             self.detail = "The paired phone is not visible right now."
             return
         self.state = "connected" if connected and self._map_path else "phone_nearby"
-        if not self.detail:
-            self.detail = "Phone nearby." if not connected else "Connected."
+        if connected and self._map_path:
+            self.detail = connected_status(settings["phoneName"])
+        elif not self.detail:
+            self.detail = "Phone nearby."
 
     async def _register_agent(self) -> None:
         if self._agent_on:

@@ -444,6 +444,15 @@ def notification_command(title: str, body: str, thread: str, program: str = "oma
     return args
 
 
+
+def connected_status(phone_name: str) -> str:
+    """Status line once the phone's message link is up."""
+    name = (phone_name or "").strip()
+    if name:
+        return f"Connected: {name}"
+    return "Connected"
+
+
 def notification_title(sender: str) -> str:
     """Name to show in a desktop notification.
 

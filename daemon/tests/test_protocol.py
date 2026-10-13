@@ -189,6 +189,10 @@ class NotificationTests(unittest.TestCase):
     def test_number_is_not_used_as_a_title(self):
         self.assertEqual(protocol.notification_title("+15551234567"), "New message")
 
+    def test_connected_status_names_the_phone(self):
+        self.assertEqual(protocol.connected_status("JM iPhone"), "Connected: JM iPhone")
+        self.assertEqual(protocol.connected_status("  "), "Connected")
+
     def test_name_is_kept(self):
         self.assertEqual(protocol.notification_title("Ada Lovelace"), "Ada Lovelace")
 
