@@ -510,17 +510,21 @@ Item {
   }
 
   function linkify(value) {
-    // Only http and https. The address is escaped, so the message cannot
-    // add its own markup or start an image download.
+    // The iPhone also links a bare host such as voterep.co/j237n.
+    // The address is escaped, so the message cannot add its own markup.
     var text = String(value || "")
-    var pattern = /(?:https?:\/\/|www\.)[^\s<>"']+/gi
+    var tlds = "com|org|net|edu|gov|mil|int|io|co|app|dev|me|tv|ai|info|biz|us|uk|ca|au|de|fr|nl|se|no|fi|es|it|ch|at|be|nz|ie|eu|xyz|link|news|blog|online|site|store|tech|cloud|live|page|pro|gg|ly"
+    var pattern = new RegExp("(?:https?:\\/\\/|www\\.)[^\\s<>\"']+|(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+(?:" + tlds + ")(?:\\/[^\\s<>\"']*)?", "gi")
     var out = ""
     var last = 0
     var match
     while ((match = pattern.exec(text)) !== null) {
+      var prev = match.index > 0 ? text.charAt(match.index - 1) : ""
+      if (/[\w@]/.test(prev) && !/^(?:https?:\/\/|www\.)/i.test(match[0]))
+        continue
       out += root.escapeHtml(text.slice(last, match.index))
       var shown = root.trimUrl(match[0])
-      var href = /^www\./i.test(shown) ? "https://" + shown : shown
+      var href = /^https?:\/\//i.test(shown) ? shown : "https://" + shown
       out += "<a href=\"" + root.escapeHtml(href) + "\">" + root.escapeHtml(shown) + "</a>"
       out += root.escapeHtml(match[0].slice(shown.length))
       last = match.index + match[0].length
