@@ -337,6 +337,11 @@ class BluetoothSession:
         self.state = "phone_nearby"
         self.detail = "iPhone is paired."
 
+    async def list_phones(self) -> None:
+        """Publish phones BlueZ already knows. This does not start discovery."""
+        async with self.lock:
+            self.emit({"event": "devices", "devices": await self._phone_dicts()})
+
     async def scan(self) -> None:
         async with self.lock:
             self.state = "scanning"

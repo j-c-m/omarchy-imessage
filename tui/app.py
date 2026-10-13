@@ -25,6 +25,8 @@ from tui.client import connect
 from tui.render import link_spans
 
 HINT = "j/k move    enter open    r reply    n new    ctrl+d delete    / filter    t notification text    esc back"
+PHONE_HINT = "j/k move    enter pair    p other pairing    / filter    esc back"
+CODE_HINT = "y accept    n reject    esc cancel"
 
 
 class ThreadList(OptionList):
@@ -34,8 +36,19 @@ class ThreadList(OptionList):
         Binding("down", "cursor_down", "down"),
         Binding("up", "cursor_up", "up"),
         Binding("enter", "select", "open"),
+        Binding("p", "pair_explicit", "pair"),
         Binding("t", "notify", "notification text"),
     ]
+
+    def action_select(self) -> None:
+        app = self.app
+        if getattr(app, "mode", "") == "phones" and self.highlighted is None:
+            app.action_scan()
+            return
+        super().action_select()
+
+    def action_pair_explicit(self) -> None:
+        self.app.action_pair_explicit()
 
     def action_notify(self) -> None:
         self.app.action_notify()
@@ -173,6 +186,9 @@ class ImsgApp(App):
         self.filter_text = ""
         self.filter_on = False
         self.pair_code = ""
+        self.phones: list[dict] = []
+        self.link_state = ""
+        self._followed = False
         self.messages: list[dict] = []
         self._message_fit = 0
         self._reflowing = False
@@ -259,6 +275,7 @@ class ImsgApp(App):
                 box.can_focus = False
                 box.value = ""
             self._show_threads()
+            self._hint_for_mode()
         self.query_one("#threads", ThreadList).focus()
         focus_this_window()
 
@@ -292,6 +309,10 @@ class ImsgApp(App):
             self.contacts = list(event.get("contacts") or [])
             if self.mode == "contacts":
                 self._show_contacts()
+        elif kind == "devices":
+            self.phones = list(event.get("devices") or [])
+            if self.mode == "phones":
+                self._show_phones()
         elif kind == "sent":
             key = str(event.get("thread") or self.open_key)
             if key:
@@ -301,14 +322,20 @@ class ImsgApp(App):
         elif kind == "status":
             status = event.get("status") or {}
             self.notify_body = bool(status.get("notifyBody"))
-            if status.get("state") == "connected":
+            state = str(status.get("state") or "")
+            self.link_state = state
+            if self.pair_code:
+                self._set_status("Pairing code " + self.pair_code)
+            elif state == "connected":
                 name = str(status.get("phoneName") or "").strip()
                 self._set_status("Connected: " + name if name else "Connected")
             else:
                 self._set_status(str(status.get("detail") or ""))
+            self._follow_link(state)
         elif kind == "pair-code":
             self.pair_code = str(event.get("code") or "")
             self._set_status("Pairing code " + self.pair_code)
+            self._hint_for_mode()
         elif kind == "error":
             self._set_status(str(event.get("message") or "Error"))
 
@@ -343,6 +370,39 @@ class ImsgApp(App):
     def _show_contacts(self) -> None:
         self.shown = [row for row in self.contacts if self._matches(str(row.get("name") or ""))]
         self._fill(lambda row: _clip(str(row.get("name") or row.get("address") or ""), 20))
+
+    def _show_phones(self) -> None:
+        needle = self.filter_text.casefold()
+        self.shown = []
+        for row in self.phones:
+            hay = (str(row.get("name") or "") + " " + str(row.get("address") or "")).casefold()
+            if not needle or needle in hay:
+                self.shown.append(row)
+        self._fill(lambda row: _clip(str(row.get("name") or row.get("address") or ""), 20))
+
+    def _enter_phones(self) -> None:
+        self.mode = "phones"
+        self.filter_text = ""
+        self.filter_on = False
+        box = self.query_one("#filter", Input)
+        box.display = False
+        box.can_focus = False
+        box.value = ""
+        self._show_phones()
+        self._hint_for_mode()
+        self.client.send({"cmd": "devices"})
+
+    def _follow_link(self, state: str) -> None:
+        """Open the phone list until a phone is connected, then leave it."""
+        if not self._followed:
+            self._followed = True
+            if state in ("not_paired", "scanning") and not self.launch_thread:
+                self._enter_phones()
+            return
+        if self.mode == "phones" and state == "connected":
+            self.mode = "threads"
+            self._show_threads()
+            self._hint_for_mode()
 
     def _thread_prompt(self, row: dict) -> str:
         mark = "• " if row.get("unread") else ""
@@ -381,6 +441,9 @@ class ImsgApp(App):
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         if self.mode == "contacts":
             self._pick_contact()
+            return
+        if self.mode == "phones":
+            self._pair_current(False)
             return
         self._open_highlighted()
 
@@ -512,6 +575,8 @@ class ImsgApp(App):
         self.filter_text = event.value
         if self.mode == "contacts":
             self.client.send({"cmd": "contacts", "query": self.filter_text})
+        elif self.mode == "phones":
+            self._show_phones()
         else:
             self._show_threads()
 
@@ -529,12 +594,20 @@ class ImsgApp(App):
             self.query_one("#threads", ThreadList).focus()
             if self.mode == "contacts":
                 self._show_contacts()
+            elif self.mode == "phones":
+                self._show_phones()
             else:
                 self._show_threads()
             return
-        if self.mode == "contacts":
+        if self.pair_code:
+            self.client.send({"cmd": "cancel"})
+            self.pair_code = ""
+            self._hint_for_mode()
+            return
+        if self.mode == "contacts" or self.mode == "phones":
             self.mode = "threads"
             self._show_threads()
+            self._hint_for_mode()
             return
         self.exit()
 
@@ -548,17 +621,43 @@ class ImsgApp(App):
     def _hint(self, text: str = HINT) -> None:
         self.query_one("#hint", Static).update(text)
 
+    def _hint_for_mode(self) -> None:
+        if self.pair_code:
+            self._hint(CODE_HINT)
+        elif self.mode == "phones":
+            self._hint(PHONE_HINT)
+        else:
+            self._hint(HINT)
+
+    def action_scan(self) -> None:
+        if self._typing() or self.mode != "phones":
+            return
+        self.client.send({"cmd": "scan"})
+
+    def action_pair_explicit(self) -> None:
+        if self._typing() or self.mode != "phones":
+            return
+        self._pair_current(True)
+
+    def _pair_current(self, explicit: bool) -> None:
+        row = self._current()
+        if not row or not row.get("address"):
+            return
+        self.client.send({"cmd": "pair", "address": str(row["address"]), "explicit": explicit})
+
     def action_accept_pair(self) -> None:
         if self._typing() or not self.pair_code:
             return
         self.client.send({"cmd": "confirm", "accept": True})
         self.pair_code = ""
+        self._hint_for_mode()
 
     def action_reject_pair(self) -> None:
         if self._typing() or not self.pair_code:
             return
         self.client.send({"cmd": "confirm", "accept": False})
         self.pair_code = ""
+        self._hint_for_mode()
 
     def _typing(self) -> bool:
         focused = self.focused

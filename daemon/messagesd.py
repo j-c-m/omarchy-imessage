@@ -167,6 +167,13 @@ async def dispatch(name: str, command: dict, store: Store, session) -> None:
             emit({"event": "threads", "threads": store.threads()})
         return
 
+    if name == "devices":
+        if session:
+            await session.list_phones()
+        else:
+            emit({"event": "devices", "devices": []})
+        return
+
     if session is None:
         raise RuntimeError("Bluetooth messaging is not available yet.")
 

@@ -294,5 +294,128 @@ class OpenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(composer.region.height, 1)
 
 
+class PairTests(unittest.IsolatedAsyncioTestCase):
+    async def test_an_unpaired_phone_lists_phones_and_enter_pairs(self):
+        client = QueueClient()
+        app = ImsgApp(client=client)
+        async with app.run_test(size=(100, 24)) as pilot:
+            await client.push({"event": "status", "status": {"state": "not_paired", "detail": "Select your iPhone."}})
+            await client.push({
+                "event": "devices",
+                "devices": [
+                    {"address": "AA:BB:CC:DD:EE:FF", "name": "Ada iPhone", "paired": False},
+                    {"address": "11:22:33:44:55:66", "name": "Other Phone", "paired": False},
+                ],
+            })
+            await pilot.pause()
+            self.assertEqual(app.mode, "phones")
+            self.assertEqual(str(app.query_one("#hint").content), "j/k move    enter pair    p other pairing    / filter    esc back")
+            panel = app.query_one("#threads")
+            self.assertEqual(panel.get_option_at_index(0).prompt, "Ada iPhone")
+            await pilot.press("enter")
+            await pilot.pause()
+        self.assertIn({"cmd": "devices"}, client.sent)
+        self.assertEqual(
+            [item for item in client.sent if item["cmd"] == "pair"],
+            [{"cmd": "pair", "address": "AA:BB:CC:DD:EE:FF", "explicit": False}],
+        )
+
+    async def test_p_pairs_without_connecting_first(self):
+        client = QueueClient()
+        app = ImsgApp(client=client)
+        async with app.run_test(size=(100, 24)) as pilot:
+            await client.push({"event": "status", "status": {"state": "not_paired", "detail": ""}})
+            await client.push({
+                "event": "devices",
+                "devices": [
+                    {"address": "AA:BB:CC:DD:EE:FF", "name": "Ada iPhone", "paired": False},
+                    {"address": "11:22:33:44:55:66", "name": "Other Phone", "paired": False},
+                ],
+            })
+            await pilot.pause()
+            await pilot.press("j")
+            await pilot.press("p")
+            await pilot.pause()
+        self.assertEqual(
+            [item for item in client.sent if item["cmd"] == "pair"],
+            [{"cmd": "pair", "address": "11:22:33:44:55:66", "explicit": True}],
+        )
+
+    async def test_enter_on_an_empty_phone_list_scans(self):
+        client = QueueClient()
+        app = ImsgApp(client=client)
+        async with app.run_test(size=(100, 24)) as pilot:
+            await client.push({"event": "status", "status": {"state": "not_paired", "detail": ""}})
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+        self.assertIn({"cmd": "scan"}, client.sent)
+
+    async def test_a_phone_filter_hides_other_phones(self):
+        client = QueueClient()
+        app = ImsgApp(client=client)
+        async with app.run_test(size=(100, 24)) as pilot:
+            await client.push({"event": "status", "status": {"state": "not_paired", "detail": ""}})
+            await client.push({
+                "event": "devices",
+                "devices": [
+                    {"address": "AA:BB:CC:DD:EE:FF", "name": "Ada iPhone", "paired": False},
+                    {"address": "11:22:33:44:55:66", "name": "Other Phone", "paired": False},
+                ],
+            })
+            await pilot.pause()
+            await pilot.press("slash")
+            await pilot.press("o", "t", "h")
+            await pilot.pause()
+            panel = app.query_one("#threads")
+            self.assertEqual(panel.option_count, 1)
+            self.assertEqual(panel.get_option_at_index(0).prompt, "Other Phone")
+
+    async def test_a_connected_phone_leaves_the_phone_list(self):
+        client = QueueClient()
+        app = ImsgApp(client=client)
+        async with app.run_test(size=(100, 24)) as pilot:
+            await client.push({
+                "event": "threads",
+                "threads": [{"key": "tel:+15550001111", "label": "Ada", "unread": 0, "preview": "hi"}],
+            })
+            await client.push({"event": "status", "status": {"state": "not_paired", "detail": ""}})
+            await pilot.pause()
+            self.assertEqual(app.mode, "phones")
+            await client.push({"event": "status", "status": {"state": "connected", "phoneName": "Ada iPhone"}})
+            await pilot.pause()
+            self.assertEqual(app.mode, "threads")
+            self.assertEqual(app.query_one("#threads").get_option_at_index(0).prompt, "Ada")
+            self.assertEqual(str(app.query_one("#status").content), "Connected: Ada iPhone")
+
+    async def test_a_pairing_code_accepts_rejects_and_cancels(self):
+        client = QueueClient()
+        app = ImsgApp(client=client)
+        async with app.run_test(size=(100, 24)) as pilot:
+            await client.push({"event": "pair-code", "code": "123456"})
+            await client.push({"event": "status", "status": {"state": "pairing", "detail": "Confirm this code on the iPhone too."}})
+            await pilot.pause()
+            self.assertEqual(str(app.query_one("#status").content), "Pairing code 123456")
+            self.assertEqual(str(app.query_one("#hint").content), "y accept    n reject    esc cancel")
+            await pilot.press("y")
+            await pilot.pause()
+            self.assertEqual(app.pair_code, "")
+            await client.push({"event": "pair-code", "code": "654321"})
+            await pilot.pause()
+            await pilot.press("n")
+            await pilot.pause()
+            await client.push({"event": "pair-code", "code": "111222"})
+            await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause()
+        confirms = [item for item in client.sent if item["cmd"] == "confirm"]
+        self.assertEqual(confirms, [
+            {"cmd": "confirm", "accept": True},
+            {"cmd": "confirm", "accept": False},
+        ])
+        self.assertIn({"cmd": "cancel"}, client.sent)
+        self.assertEqual(app.pair_code, "")
+
+
 if __name__ == "__main__":
     unittest.main()
