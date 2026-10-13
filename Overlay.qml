@@ -1050,27 +1050,63 @@ Item {
               clip: true
               model: root.svc ? root.svc.messages : 0
               boundsBehavior: Flickable.StopAtBounds
-              onCountChanged: if (count > 0) positionViewAtEnd()
+              // After the model has finished changing. Doing this inside the
+              // count change re-enters layout while a new conversation is built.
+              onCountChanged: if (count > 0) Qt.callLater(positionViewAtEnd)
 
               delegate: Item {
                 required property string body
                 required property string direction
                 required property string timestamp
+                // textFormat stays fixed on each Text. Flipping one item
+                // between RichText and StyledText spins the list on a
+                // conversation change.
+                readonly property bool linked: root.linkRanges(body).length > 0
+                // One extra pixel. The drawn text is slightly wider than a
+                // plain measurement, and "boo ho" was wrapping at the space.
+                readonly property int textCap: Math.max(1, transcript.width * 0.62)
+                readonly property int textWidth: {
+                  var natural = linked ? linkMeasure.implicitWidth : emojiMeasure.implicitWidth
+                  if (natural <= 0)
+                    return textCap
+                  if (natural > textCap)
+                    return Math.floor(textCap)
+                  return Math.ceil(natural) + 1
+                }
+                // Not a binding to the styled text. A live height binding
+                // spins the list when the conversation changes.
+                property int textHeight: 0
+                function syncTextHeight() {
+                  var next = Math.ceil(linked ? linkText.implicitHeight : emojiText.implicitHeight)
+                  if (next > 0 && next !== textHeight)
+                    textHeight = next
+                }
+                onTextWidthChanged: Qt.callLater(syncTextHeight)
+                onLinkedChanged: Qt.callLater(syncTextHeight)
+                onBodyChanged: Qt.callLater(syncTextHeight)
+                Component.onCompleted: syncTextHeight()
                 width: transcript.width
                 height: bubbleColumn.height + Style.space(10)
 
-                // A hidden line measures the words so the bubble can hug them
-                // instead of stretching across the whole conversation.
                 Text {
-                  id: measure
+                  id: emojiMeasure
                   visible: false
-                  // Plain text on purpose. Qt's default AutoText parser can
-                  // treat a message as HTML and start an image download while
-                  // it measures the width, even when this line is hidden.
-                  textFormat: Text.PlainText
-                  text: body
+                  wrapMode: Text.NoWrap
+                  textFormat: Text.RichText
+                  text: linked ? "" : root.withEmojiFont(body)
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.body
+                }
+
+                Text {
+                  id: linkMeasure
+                  visible: false
+                  wrapMode: Text.NoWrap
+                  textFormat: Text.StyledText
+                  text: linked ? root.styledMessage(body) : ""
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                  linkColor: direction === "out" ? root.selectedText : root.foreground
                 }
 
                 Column {
@@ -1083,39 +1119,52 @@ Item {
                     id: bubble
                     radius: Style.space(8)
                     color: direction === "out" ? root.selectedBackground : root.incomingBubble
-                    width: bodyText.width + Style.space(20)
-                    height: bodyText.implicitHeight + Style.space(14)
+                    width: textWidth + Style.space(20)
+                    height: textHeight + Style.space(14)
 
                     Text {
-                      id: bodyText
+                      id: emojiText
                       x: Style.space(10)
                       y: Style.space(7)
-                      width: Math.min(measure.implicitWidth, Math.max(1, transcript.width * 0.62))
+                      width: textWidth
+                      visible: !linked
                       wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                      // StyledText wraps a long address. RichText is only for
-                      // the emoji font, and only when the message has no link.
-                      readonly property bool linked: root.linkRanges(body).length > 0
-                      textFormat: linked ? Text.StyledText : Text.RichText
-                      text: linked ? root.styledMessage(body) : root.withEmojiFont(body)
+                      textFormat: Text.RichText
+                      text: linked ? "" : root.withEmojiFont(body)
+                      color: direction === "out" ? root.selectedText : root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.body
+                    }
+
+                    Text {
+                      id: linkText
+                      x: Style.space(10)
+                      y: Style.space(7)
+                      width: textWidth
+                      visible: linked
+                      wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                      textFormat: Text.StyledText
+                      text: linked ? root.styledMessage(body) : ""
                       color: direction === "out" ? root.selectedText : root.foreground
                       linkColor: direction === "out" ? root.selectedText : root.foreground
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.body
+                    }
 
-                      MouseArea {
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        onPositionChanged: function(mouse) {
-                          cursorShape = bodyText.linkAt(mouse.x, mouse.y) ? Qt.PointingHandCursor : Qt.ArrowCursor
-                        }
-                        onExited: cursorShape = Qt.ArrowCursor
-                        onClicked: function(mouse) {
-                          var link = bodyText.linkAt(mouse.x, mouse.y)
-                          if (link)
-                            root.openLink(link)
-                          else
-                            mouse.accepted = false
-                        }
+                    MouseArea {
+                      anchors.fill: parent
+                      hoverEnabled: true
+                      onPositionChanged: function(mouse) {
+                        var link = linkText.linkAt(mouse.x - linkText.x, mouse.y - linkText.y)
+                        cursorShape = link ? Qt.PointingHandCursor : Qt.ArrowCursor
+                      }
+                      onExited: cursorShape = Qt.ArrowCursor
+                      onClicked: function(mouse) {
+                        var link = linkText.linkAt(mouse.x - linkText.x, mouse.y - linkText.y)
+                        if (link)
+                          root.openLink(link)
+                        else
+                          mouse.accepted = false
                       }
                     }
                   }
