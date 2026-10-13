@@ -80,7 +80,7 @@ def notification_program() -> str:
 
 
 async def notify(title: str, body: str, thread: str = "") -> None:
-    """Desktop notification. Left click opens the panel on this conversation."""
+    """Desktop notification. Left click opens the terminal screen on this conversation."""
     args = notification_command(title, body, thread, notification_program())
     try:
         await asyncio.create_subprocess_exec(

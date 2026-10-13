@@ -84,31 +84,19 @@ Item {
     : 0
 
   function open(payloadJson) {
-    root.pendingThread = ""
+    // Clicks that used to summon this card open the terminal screen instead.
+    var thread = ""
     if (payloadJson) {
       try {
         var payload = JSON.parse(payloadJson)
         if (payload && payload.thread)
-          root.pendingThread = String(payload.thread)
+          thread = String(payload.thread)
       } catch (ignore) {
       }
     }
-    root.opened = true
-    root.holdingKeys = true
-    root.helpOn = false
-    root.composeFocus = false
-    root.toAddress = ""
-    root.toLabel = ""
-    root.filterText = ""
-    root.filterOn = false
-    root.selected = 0
-    root.followState(true)
-    // A saved phone retries the message link. A missing phone starts a scan.
-    if (root.svc && (root.svc.state === "waiting_for_switches" || root.svc.state === "phone_nearby"))
-      root.svc.reconnect()
-    else if (root.screen === "setup" && root.svc)
-      root.svc.scan()
-    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+    if (root.svc && root.svc.launchTui)
+      root.svc.launchTui(thread)
+    root.dismiss()
   }
 
   function close() {

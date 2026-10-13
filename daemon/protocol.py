@@ -7,7 +7,7 @@ Bluetooth Message Access Profile uses to hand one text to a phone.
 
 from __future__ import annotations
 
-import json
+import os
 import quopri
 import re
 
@@ -426,23 +426,22 @@ def _apply_vcard_line(current: dict | None, raw_line: str) -> None:
         current["emails"].append(value)
 
 
+def tui_launcher() -> str:
+    """Script that starts the terminal screen from this checkout."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(root, "bin", "imsg-tui")
+
+
 def notification_command(title: str, body: str, thread: str, program: str = "omarchy-notification-send") -> list[str]:
-    """Desktop notification whose left click opens this panel on that conversation."""
+    """Desktop notification whose left click opens the terminal screen."""
     args = [program, "--app-name=iMsg", "-u", "normal", title]
     text = (body or "").strip()
     if text:
         args.append(text[:120])
-    payload = json.dumps({"thread": thread}) if thread else "{}"
-    args.extend([
-        "--exec",
-        "omarchy-shell",
-        "shell",
-        "summon",
-        "io.github.nikolaos-gkionis.messages",
-        payload,
-    ])
+    args.extend(["--exec", "omarchy-launch-terminal", tui_launcher()])
+    if thread:
+        args.extend(["--thread", thread])
     return args
-
 
 
 def connected_status(phone_name: str) -> str:

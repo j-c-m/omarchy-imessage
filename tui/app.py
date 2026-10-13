@@ -136,7 +136,7 @@ class ImsgApp(App):
         Binding("y", "accept_pair", "yes"),
     ]
 
-    def __init__(self, client=None, standalone: bool = False) -> None:
+    def __init__(self, client=None, standalone: bool = False, thread: str = "") -> None:
         super().__init__(ansi_color=True)
         # ansi-dark uses the terminal's 16 colors, not a fixed hex palette.
         self.theme = "ansi-dark"
@@ -147,6 +147,7 @@ class ImsgApp(App):
         self.contacts: list[dict] = []
         self.mode = "threads"
         self.open_key = ""
+        self.launch_thread = thread
         self.compose_address = ""
         self.filter_text = ""
         self.filter_on = False
@@ -237,6 +238,22 @@ class ImsgApp(App):
     def _show_threads(self) -> None:
         self.shown = [row for row in self.threads if self._matches(str(row.get("label") or ""))]
         self._fill(self._thread_prompt)
+        self._open_launched_thread()
+
+    def _open_launched_thread(self) -> None:
+        key = self.launch_thread
+        if not key:
+            return
+        self.launch_thread = ""
+        widget = self.query_one("#threads", ThreadList)
+        for index, row in enumerate(self.shown):
+            if row.get("key") != key:
+                continue
+            if widget.highlighted != index:
+                widget.highlighted = index
+            if self.open_key != key:
+                self._open_highlighted()
+            return
 
     def _show_contacts(self) -> None:
         self.shown = [row for row in self.contacts if self._matches(str(row.get("name") or ""))]
@@ -496,7 +513,12 @@ def render_message(message: dict, width: int = 0) -> Text:
 def main(argv: list[str] | None = None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
     standalone = "--standalone" in args
-    app = ImsgApp(standalone=standalone)
+    thread = ""
+    if "--thread" in args:
+        index = args.index("--thread")
+        if index + 1 < len(args):
+            thread = args[index + 1]
+    app = ImsgApp(standalone=standalone, thread=thread)
     app.run()
 
 

@@ -196,23 +196,22 @@ class NotificationTests(unittest.TestCase):
     def test_name_is_kept(self):
         self.assertEqual(protocol.notification_title("Ada Lovelace"), "Ada Lovelace")
 
-    def test_left_click_opens_that_conversation(self):
+    def test_left_click_opens_the_tui_on_that_conversation(self):
         args = protocol.notification_command("Ada Lovelace", "hello", "tel:+15550001111")
         self.assertEqual(args[:5], ["omarchy-notification-send", "--app-name=iMsg", "-u", "normal", "Ada Lovelace"])
         self.assertEqual(args[5], "hello")
         self.assertEqual(args[6:], [
             "--exec",
-            "omarchy-shell",
-            "shell",
-            "summon",
-            "io.github.nikolaos-gkionis.messages",
-            '{"thread": "tel:+15550001111"}',
+            "omarchy-launch-terminal",
+            protocol.tui_launcher(),
+            "--thread",
+            "tel:+15550001111",
         ])
 
-    def test_left_click_opens_the_panel_without_a_thread(self):
+    def test_left_click_opens_the_tui_without_a_thread(self):
         args = protocol.notification_command("New message", "", "")
         self.assertNotIn("", args)
-        self.assertEqual(args[-1], "{}")
+        self.assertEqual(args[-3:], ["--exec", "omarchy-launch-terminal", protocol.tui_launcher()])
 
 
 if __name__ == "__main__":

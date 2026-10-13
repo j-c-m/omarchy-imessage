@@ -2,8 +2,8 @@ import QtQuick
 import Quickshell
 import qs.Ui
 
-// Small bar button. The count is the only thing it shows. The text of a
-// message stays inside the overlay.
+// Small bar button. The count is the only thing it shows. A click opens
+// the terminal screen.
 BarWidget {
   id: root
   moduleName: "io.github.nikolaos-gkionis.messages"
@@ -25,8 +25,8 @@ BarWidget {
     onPressed: function(buttonCode) {
       if (buttonCode !== Qt.LeftButton)
         return
-      if (root.bar && root.bar.shell && root.bar.shell.summon)
-        root.bar.shell.summon(root.moduleName, "{}")
+      if (root.svc && root.svc.launchTui)
+        root.svc.launchTui("")
     }
   }
 }

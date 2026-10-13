@@ -130,6 +130,22 @@ class OpenTests(unittest.IsolatedAsyncioTestCase):
         marked = [item for item in client.sent if item["cmd"] == "mark-read"]
         self.assertEqual(marked[-1]["thread"], "tel:+15550002222")
 
+    async def test_a_notification_thread_opens_that_conversation(self):
+        client = QueueClient()
+        app = ImsgApp(client=client, thread="tel:+15550002222")
+        async with app.run_test(size=(100, 24)) as pilot:
+            await client.push({
+                "event": "threads",
+                "threads": [
+                    {"key": "tel:+15550001111", "label": "Ada", "unread": 1, "preview": "hi"},
+                    {"key": "tel:+15550002222", "label": "Bo", "unread": 1, "preview": "yo"},
+                ],
+            })
+            await pilot.pause()
+            self.assertEqual(app.open_key, "tel:+15550002222")
+        marked = [item for item in client.sent if item["cmd"] == "mark-read"]
+        self.assertEqual(marked[-1]["thread"], "tel:+15550002222")
+
     async def test_t_toggles_notification_text(self):
         client = QueueClient()
         app = ImsgApp(client=client)
