@@ -12,7 +12,7 @@ try:
 except ImportError:  # pragma: no cover
     raise unittest.SkipTest("textual is not installed")
 
-from tui.app import Composer, ImsgApp, render_message
+from tui.app import Composer, ImsgApp, Transcript, render_message
 
 
 def _background_columns(text, prefix: str) -> list[list[int]]:
@@ -228,6 +228,42 @@ class OpenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(panel.region.width, 23)
             self.assertEqual(panel.content_region.width, 20)
             self.assertEqual(panel.get_option_at_index(0).prompt, "A very long contact ")
+
+    async def test_resizing_the_window_reflows_the_conversation(self):
+        client = QueueClient()
+        app = ImsgApp(client=client)
+        async with app.run_test(size=(100, 24)) as pilot:
+            await client.push({
+                "event": "threads",
+                "threads": [
+                    {"key": "tel:+15550001111", "label": "Ada", "unread": 0, "preview": "hi"},
+                    {"key": "tel:+15550002222", "label": "Bo", "unread": 0, "preview": "yo"},
+                ],
+            })
+            await pilot.pause()
+            await pilot.press("j")
+            await pilot.pause()
+            await client.push({
+                "event": "messages",
+                "thread": "tel:+15550002222",
+                "messages": [
+                    {"body": "hello " * 40, "direction": "in", "timestamp": "2026-10-02T12:00:00"},
+                ],
+            })
+            await pilot.pause()
+            log = app.query_one("#transcript", Transcript)
+            wide_lines = len(log.lines)
+            wide = log.scrollable_content_region.width
+            self.assertGreater(wide_lines, 1)
+            self.assertGreater(wide, 40)
+            await pilot.resize_terminal(52, 24)
+            narrow = log.scrollable_content_region.width
+            self.assertLess(narrow, wide)
+            self.assertGreater(len(log.lines), wide_lines)
+            self.assertLessEqual(max(strip.cell_length for strip in log.lines), narrow)
+            await pilot.resize_terminal(100, 24)
+            self.assertEqual(len(log.lines), wide_lines)
+            self.assertLessEqual(max(strip.cell_length for strip in log.lines), log.scrollable_content_region.width)
 
     async def test_reply_starts_at_one_line_and_grows_to_five(self):
         client = QueueClient()

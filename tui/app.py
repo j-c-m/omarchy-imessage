@@ -17,6 +17,7 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.events import Resize
 from textual.widgets import Input, OptionList, RichLog, Static, TextArea
 from textual.widgets.option_list import Option
 
@@ -67,6 +68,16 @@ class Composer(TextArea):
         if self.styles.height is not None and self.styles.height.cells == lines:
             return
         self.styles.height = lines
+
+
+class Transcript(RichLog):
+    """Message log. A resize wraps the open conversation again."""
+
+    def on_resize(self, event: Resize) -> None:
+        super().on_resize(event)
+        reflow = getattr(self.app, "reflow_messages", None)
+        if reflow is not None:
+            reflow()
 
 
 class ImsgApp(App):
@@ -162,6 +173,9 @@ class ImsgApp(App):
         self.filter_text = ""
         self.filter_on = False
         self.pair_code = ""
+        self.messages: list[dict] = []
+        self._message_fit = 0
+        self._reflowing = False
         self.notify_body = False
         self._filling = False
 
@@ -172,7 +186,7 @@ class ImsgApp(App):
         with Horizontal(id="body"):
             yield ThreadList(id="threads")
             with Vertical(id="stack"):
-                yield RichLog(id="transcript", wrap=True, markup=False, min_width=8, auto_scroll=True)
+                yield Transcript(id="transcript", wrap=True, markup=False, min_width=8, auto_scroll=True)
                 yield Composer("", id="composer", show_line_numbers=False, compact=True)
         yield Static("", classes="bar-gap")
         yield Static(HINT, id="hint")
@@ -383,15 +397,35 @@ class ImsgApp(App):
         self.client.send({"cmd": "mark-read", "thread": key})
 
     def _show_messages(self, messages: list[dict]) -> None:
-        log = self.query_one("#transcript", RichLog)
-        # One column short of the log. A line that fills the log is wrapped
-        # again, which was splitting the minutes and the sent text.
-        width = log.scrollable_content_region.width or log.content_region.width or log.size.width
-        fit = max(1, width - 1)
-        log.clear()
-        for message in messages:
-            log.write(render_message(message, fit), width=width)
-        log.scroll_end(animate=False)
+        self.messages = list(messages)
+        self._message_fit = 0
+        self.reflow_messages()
+
+    def reflow_messages(self) -> None:
+        """Wrap the open conversation to the transcript's current width."""
+        if self._reflowing:
+            return
+        log = self.query_one("#transcript", Transcript)
+        self._reflowing = True
+        try:
+            at_end = log.is_vertical_scroll_end
+            y = log.scroll_y
+            for _ in range(3):
+                width = log.scrollable_content_region.width or log.content_region.width or log.size.width
+                fit = max(1, width - 1)
+                # A line that fills the log is wrapped again, which splits the time.
+                if fit < 4 or fit == self._message_fit:
+                    break
+                self._message_fit = fit
+                log.clear()
+                for message in self.messages:
+                    log.write(render_message(message, fit), width=width)
+            if at_end:
+                log.scroll_end(animate=False)
+            else:
+                log.scroll_to(y=y, animate=False)
+        finally:
+            self._reflowing = False
 
     def action_reply(self) -> None:
         if self._typing() or self.mode != "threads":
