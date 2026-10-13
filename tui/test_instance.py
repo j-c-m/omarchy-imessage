@@ -3,11 +3,12 @@
 import json
 import os
 import socket
+import sys
 import tempfile
 import threading
 import unittest
 
-from tui.instance import address_for_pids, ancestor_pids, claim, release, socket_path
+from tui.instance import address_for_pids, ancestor_pids, claim, release, socket_path, terminal_command
 
 
 class InstanceTests(unittest.TestCase):
@@ -67,6 +68,13 @@ class InstanceTests(unittest.TestCase):
         self.assertEqual(address_for_pids(clients, [20, 10, 1]), "0xself")
         self.assertEqual(address_for_pids(clients, [11, 10]), "0xparent")
         self.assertEqual(address_for_pids(clients, [3]), "")
+
+    def test_the_terminal_runs_the_shell_launcher(self) -> None:
+        command = terminal_command("tel:+15550001111", False)
+        self.assertTrue(command[1].endswith("/bin/imsg-tui"))
+        self.assertEqual(command[2:], ["--inside", "--thread", "tel:+15550001111"])
+        self.assertNotIn("python3", command)
+        self.assertNotIn(sys.executable, command)
 
     def test_ancestor_pids_include_this_process(self) -> None:
         pids = ancestor_pids()

@@ -10,7 +10,6 @@ import json
 import os
 import socket
 import subprocess
-import sys
 
 
 def socket_path() -> str:
@@ -23,16 +22,29 @@ def terminal_program() -> str:
     return os.path.join(root, "bin", "omarchy-launch-terminal")
 
 
-def exec_in_terminal(thread: str, standalone: bool) -> None:
-    """Replace this process with a terminal running the screen."""
-    program = terminal_program()
-    script = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "imsg-tui")
-    command = [program, sys.executable, script, "--inside"]
+def launcher_script() -> str:
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(root, "bin", "imsg-tui")
+
+
+def terminal_command(thread: str, standalone: bool) -> list[str]:
+    """Argv for a terminal whose command is the shell launcher.
+
+    The launcher is a shell script. Running it with Python exits at once,
+    and the new window closes.
+    """
+    command = [terminal_program(), launcher_script(), "--inside"]
     if standalone:
         command.append("--standalone")
     if thread:
         command.extend(["--thread", thread])
-    os.execvp(program, command)
+    return command
+
+
+def exec_in_terminal(thread: str, standalone: bool) -> None:
+    """Replace this process with a terminal running the screen."""
+    command = terminal_command(thread, standalone)
+    os.execvp(command[0], command)
 
 
 def ancestor_pids(pid: int | None = None) -> list[int]:
