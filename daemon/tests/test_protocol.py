@@ -152,6 +152,16 @@ class AudioProfileTests(unittest.TestCase):
         self.assertEqual(len(protocol.audio_profile_uuids()), 9)
 
 
+class CallingCodeTests(unittest.TestCase):
+    def test_a_bare_ten_digit_number_uses_the_books_country(self):
+        code = protocol.dominant_calling_code(["+15551110000", "+15552220000", "+447911000000"])
+        self.assertEqual(code, "1")
+        self.assertEqual(protocol.coerce_phone("5551234567", "+1" + "5555555555"), "+15551234567")
+
+    def test_a_tie_does_not_guess_a_country(self):
+        self.assertEqual(protocol.dominant_calling_code(["+15551110000", "+447911000000"]), "")
+
+
 class PublicErrorTests(unittest.TestCase):
     def test_a_missing_message_service_asks_for_the_iphone_switch(self):
         text = protocol.public_error(RuntimeError("Unable to find service record"))

@@ -110,6 +110,22 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(len(found), 1)
         self.assertEqual(found[0]["address"], "+15551234567")
 
+    def test_one_person_is_one_row(self):
+        self.db.replace_contacts(
+            [
+                {"name": "Sam Rivera", "address": "a@example.com", "kind": "email"},
+                {"name": "Sam Rivera", "address": "b@example.com", "kind": "email"},
+                {"name": "Ada", "address": "ada@example.com", "kind": "email"},
+                {"name": "Ada", "address": "+15551234567", "kind": "tel"},
+            ]
+        )
+        sam = self.db.search_contacts("sam")
+        self.assertEqual(len(sam), 1)
+        self.assertEqual(sam[0]["kind"], "email")
+        ada = self.db.search_contacts("ada")
+        self.assertEqual(len(ada), 1)
+        self.assertEqual(ada[0]["address"], "+15551234567")
+
     def test_a_conversation_is_someone_you_can_text(self):
         self.db.upsert_message(
             external_id="map-9",

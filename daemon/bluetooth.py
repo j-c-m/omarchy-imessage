@@ -29,6 +29,7 @@ from protocol import (
     audio_profile_uuids,
     classify_recipient,
     coerce_phone,
+    dominant_calling_code,
     extract_bmessage_peer,
     extract_bmessage_text,
     is_audio_profile,
@@ -890,9 +891,14 @@ class BluetoothSession:
             # before Sync Contacts was turned on. Drop it and open a new one.
             await self._drop_pbap()
             return
+        cards = parse_vcards(raw)
         own = self.store.settings()["ownNumber"]
+        if not own:
+            code = dominant_calling_code([phone for card in cards for phone in card["phones"]])
+            if code:
+                own = "+" + code + "5555555555"
         rows = []
-        for card in parse_vcards(raw):
+        for card in cards:
             name = card["name"] or "Unknown"
             for phone in card["phones"]:
                 number = coerce_phone(phone, own) or ""

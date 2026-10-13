@@ -110,6 +110,26 @@ def calling_code(own_number: str) -> str:
     return digits[:3] if len(digits) >= 3 else ""
 
 
+def dominant_calling_code(numbers: list[str]) -> str:
+    """Country code shared by most numbers that already include one.
+
+    A 10-digit number has no country of its own. The rest of the phone
+    book is the evidence for which country those numbers belong to.
+    """
+    counts: dict[str, int] = {}
+    for number in numbers:
+        code = calling_code(number)
+        if not code:
+            continue
+        counts[code] = counts.get(code, 0) + 1
+    if not counts:
+        return ""
+    code, count = max(counts.items(), key=lambda item: item[1])
+    if count * 2 <= sum(counts.values()):
+        return ""
+    return code
+
+
 def coerce_phone(value: str, own_number: str) -> str:
     """Turn a contact number into E.164 when that is unambiguous.
 

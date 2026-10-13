@@ -192,7 +192,7 @@ class Store:
             seen.add(address)
             if len(found) >= cap:
                 break
-        return found
+        return _one_row_per_person(found)
 
     def apply_contact_names(self) -> int:
         """Replace a bare phone number on a conversation with the contact's name."""
@@ -403,3 +403,19 @@ class Store:
     @staticmethod
     def now_stamp() -> str:
         return time.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _one_row_per_person(rows: list[dict]) -> list[dict]:
+    """One list row per name. A phone number wins over an email."""
+    chosen: dict[str, dict] = {}
+    order: list[str] = []
+    for row in rows:
+        key = (row["name"] or row["address"]).strip().casefold()
+        current = chosen.get(key)
+        if current is None:
+            chosen[key] = row
+            order.append(key)
+            continue
+        if current["kind"] != "tel" and row["kind"] == "tel":
+            chosen[key] = row
+    return [chosen[key] for key in order]
