@@ -39,6 +39,7 @@ Item {
   property string toLabel: ""
   property bool sendPending: false
   property string lastOpened: ""
+  property string pendingThread: ""
   property bool openAfterDelete: false
   property bool caretOn: true
 
@@ -80,6 +81,15 @@ Item {
     : 0
 
   function open(payloadJson) {
+    root.pendingThread = ""
+    if (payloadJson) {
+      try {
+        var payload = JSON.parse(payloadJson)
+        if (payload && payload.thread)
+          root.pendingThread = String(payload.thread)
+      } catch (ignore) {
+      }
+    }
     root.opened = true
     root.holdingKeys = true
     root.helpOn = false
@@ -197,8 +207,9 @@ Item {
   function rebuildShown() {
     if (root.screen === "contacts" || root.screen === "emoji")
       return
-    var keep = ""
-    if (root.selected >= 0 && root.selected < shownModel.count) {
+    var keep = root.pendingThread
+    root.pendingThread = ""
+    if (!keep && root.selected >= 0 && root.selected < shownModel.count) {
       var current = shownModel.get(root.selected)
       keep = current ? (current.key || current.address || "") : ""
     }

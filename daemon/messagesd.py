@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 
-from protocol import address_from_thread, normalize_phone, notification_title, public_error
+from protocol import address_from_thread, normalize_phone, notification_command, notification_title, public_error
 from store import Store
 
 _MAC = __import__("re").compile(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
@@ -68,11 +69,17 @@ def status_from_store(store: Store, ready: bool, detail: str) -> dict:
     }
 
 
-async def notify(title: str, body: str) -> None:
-    """Desktop notification. The title is a name, never a phone number."""
-    args = ["notify-send", "--app-name=iMsg", "--urgency=normal", title]
-    if body:
-        args.append(body[:120])
+def notification_program() -> str:
+    root = os.environ.get("OMARCHY_PATH", "/usr/share/omarchy")
+    candidate = os.path.join(root, "bin", "omarchy-notification-send")
+    if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+        return candidate
+    return "omarchy-notification-send"
+
+
+async def notify(title: str, body: str, thread: str = "") -> None:
+    """Desktop notification. Left click opens the panel on this conversation."""
+    args = notification_command(title, body, thread, notification_program())
     try:
         await asyncio.create_subprocess_exec(
             *args,
@@ -213,7 +220,7 @@ def notifying_emit(store: Store, inner):
             body = ""
             if store.settings()["notifyBody"]:
                 body = str(message.get("body") or "")
-            spawn(notify(title, body))
+            spawn(notify(title, body, str(message.get("thread") or "")))
 
     return _emit
 

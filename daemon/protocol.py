@@ -7,6 +7,7 @@ Bluetooth Message Access Profile uses to hand one text to a phone.
 
 from __future__ import annotations
 
+import json
 import quopri
 import re
 
@@ -423,6 +424,24 @@ def _apply_vcard_line(current: dict | None, raw_line: str) -> None:
         current["phones"].append(value)
     elif field == "EMAIL":
         current["emails"].append(value)
+
+
+def notification_command(title: str, body: str, thread: str, program: str = "omarchy-notification-send") -> list[str]:
+    """Desktop notification whose left click opens this panel on that conversation."""
+    args = [program, "--app-name=iMsg", "-u", "normal", title]
+    text = (body or "").strip()
+    if text:
+        args.append(text[:120])
+    payload = json.dumps({"thread": thread}) if thread else "{}"
+    args.extend([
+        "--exec",
+        "omarchy-shell",
+        "shell",
+        "summon",
+        "io.github.nikolaos-gkionis.messages",
+        payload,
+    ])
+    return args
 
 
 def notification_title(sender: str) -> str:
