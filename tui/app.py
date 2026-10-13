@@ -155,6 +155,8 @@ class ImsgApp(App):
     }
     """
     BINDINGS = [
+        Binding("j", "cursor_down", "down"),
+        Binding("k", "cursor_up", "up"),
         Binding("r", "reply", "reply"),
         Binding("n", "new_text", "new"),
         Binding("ctrl+d", "delete_thread", "delete"),
@@ -489,6 +491,18 @@ class ImsgApp(App):
                 log.scroll_to(y=y, animate=False)
         finally:
             self._reflowing = False
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        # j and k move the name list from any pane. A reply or a filter still takes the letter.
+        if action in ("cursor_down", "cursor_up") and self._typing():
+            return False
+        return True
+
+    def action_cursor_down(self) -> None:
+        self.query_one("#threads", ThreadList).action_cursor_down()
+
+    def action_cursor_up(self) -> None:
+        self.query_one("#threads", ThreadList).action_cursor_up()
 
     def action_reply(self) -> None:
         if self._typing() or self.mode != "threads":

@@ -102,6 +102,45 @@ class LinkTests(unittest.TestCase):
 
 
 class OpenTests(unittest.IsolatedAsyncioTestCase):
+    async def test_j_moves_the_contact_while_the_transcript_is_focused(self):
+        client = QueueClient()
+        app = ImsgApp(client=client)
+        async with app.run_test(size=(100, 24)) as pilot:
+            await client.push({
+                "event": "threads",
+                "threads": [
+                    {"key": "tel:+15550001111", "label": "Ada", "unread": 0, "preview": "hi"},
+                    {"key": "tel:+15550002222", "label": "Bo", "unread": 0, "preview": "yo"},
+                ],
+            })
+            await pilot.pause()
+            app.query_one("#transcript").focus()
+            await pilot.press("j")
+            await pilot.pause()
+            self.assertEqual(app.query_one("#threads").highlighted, 1)
+            self.assertEqual(app.open_key, "tel:+15550002222")
+            await pilot.press("k")
+            await pilot.pause()
+            self.assertEqual(app.query_one("#threads").highlighted, 0)
+
+    async def test_j_types_inside_a_reply(self):
+        client = QueueClient()
+        app = ImsgApp(client=client)
+        async with app.run_test(size=(100, 24)) as pilot:
+            await client.push({
+                "event": "threads",
+                "threads": [
+                    {"key": "tel:+15550001111", "label": "Ada", "unread": 0, "preview": "hi"},
+                    {"key": "tel:+15550002222", "label": "Bo", "unread": 0, "preview": "yo"},
+                ],
+            })
+            await pilot.pause()
+            await pilot.press("r")
+            await pilot.press("j")
+            await pilot.pause()
+            self.assertIn("j", app.query_one("#composer", Composer).text)
+            self.assertEqual(app.query_one("#threads").highlighted, 0)
+
     async def test_moving_onto_a_conversation_marks_it_read_and_loads_it(self):
         client = QueueClient()
         app = ImsgApp(client=client)
