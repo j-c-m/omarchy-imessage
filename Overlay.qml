@@ -549,11 +549,94 @@ Item {
       out += root.escapeHtml(text.slice(last, match.index))
       var shown = root.trimUrl(match[0])
       var href = /^https?:\/\//i.test(shown) ? shown : "https://" + shown
-      out += "<a href=\"" + root.escapeHtml(href) + "\">" + root.escapeHtml(shown) + "</a>"
+      // A long address has no spaces. Rich text will not wrap it, and the
+      // layout pass then never finishes.
+      out += "<a href=\"" + root.escapeHtml(href) + "\">" + root.escapeHtml(root.breakLink(shown)) + "</a>"
       out += root.escapeHtml(match[0].slice(shown.length))
       last = match.index + match[0].length
     }
     out += root.escapeHtml(text.slice(last))
+    return out
+  }
+
+  function isEmojiCode(code) {
+    return (code >= 0xD800 && code <= 0xDFFF) || code === 0xFE0F || code === 0x200D || (code >= 0x2600 && code <= 0x27BF)
+  }
+
+  function linkRanges(value) {
+    // Linear scans. The old rich-text anchor is what pegged the shell
+    // on a long address, so these ranges are only for underlines and clicks.
+    var text = String(value || "")
+    var ranges = []
+    var pattern = /https?:\/\/[^\s<>"']+|www\.[^\s<>"']+/gi
+    var match
+    while ((match = pattern.exec(text)) !== null) {
+      if (!match[0].length) {
+        pattern.lastIndex += 1
+        continue
+      }
+      var shown = root.trimUrl(match[0])
+      if (!shown)
+        continue
+      var href = /^https?:\/\//i.test(shown) ? shown : "https://" + shown
+      ranges.push({ start: match.index, end: match.index + shown.length, href: href })
+    }
+    var bare = /(?:^|[^A-Za-z0-9@])([A-Za-z0-9][A-Za-z0-9-]*\.(?:com|org|net|edu|gov|io|co|app|dev|me|tv|ai|us|uk|ca|de|ly|gg)(?:\/[^\s<>"']*)?)/gi
+    while ((match = bare.exec(text)) !== null) {
+      var word = root.trimUrl(match[1] || "")
+      if (!word)
+        continue
+      var start = match.index + match[0].length - (match[1] || "").length
+      var end = start + word.length
+      var overlaps = false
+      for (var n = 0; n < ranges.length; n++) {
+        if (start < ranges[n].end && end > ranges[n].start)
+          overlaps = true
+      }
+      if (overlaps)
+        continue
+      ranges.push({ start: start, end: end, href: "https://" + word })
+    }
+    ranges.sort(function(a, b) { return a.start - b.start })
+    return ranges
+  }
+
+  function hrefAt(value, index) {
+    var ranges = root.linkRanges(value)
+    for (var i = 0; i < ranges.length; i++) {
+      if (index >= ranges[i].start && index < ranges[i].end)
+        return ranges[i].href
+    }
+    return ""
+  }
+
+  function messageHtml(value) {
+    // Underlines, not anchors. Qt's link objects retrigger layout forever.
+    var text = String(value || "")
+    var ranges = root.linkRanges(text)
+    var out = ""
+    var i = 0
+    var r = 0
+    while (i < text.length) {
+      if (r < ranges.length && i === ranges[r].start) {
+        out += "<u>" + root.escapeHtml(text.slice(ranges[r].start, ranges[r].end)) + "</u>"
+        i = ranges[r].end
+        r++
+        continue
+      }
+      if (isEmojiCode(text.charCodeAt(i))) {
+        var run = ""
+        while (i < text.length && isEmojiCode(text.charCodeAt(i)) && !(r < ranges.length && i === ranges[r].start)) {
+          run += text.charAt(i)
+          i++
+        }
+        out += "<span style=\"font-family: 'Noto Color Emoji'\">" + run + "</span>"
+        continue
+      }
+      var ch = text.charAt(i)
+      out += ch === "\n" ? "<br/>" : root.escapeHtml(ch)
+      i++
+    }
     return out
   }
 
@@ -564,10 +647,12 @@ Item {
     Qt.openUrlExternally(target)
   }
 
-  function withEmojiFont(value) {
+  function withEmojiFont(value, links) {
     // The card font has no emoji pictures. Qt on this desktop has no
     // "families" fallback, so emoji are wrapped in the emoji font.
-    var raw = root.linkify(value)
+    // Only an open message is linkified. A link in the conversation
+    // list, watched for hover, retriggers layout until the shell pegs.
+    var raw = links ? root.linkify(value) : root.escapeHtml(String(value || ""))
     var out = ""
     var run = ""
     for (var i = 0; i < raw.length; i++) {
@@ -976,9 +1061,9 @@ Item {
                   anchors.leftMargin: Style.space(12)
                   anchors.rightMargin: Style.space(8)
                   verticalAlignment: Text.AlignVCenter
-                  textFormat: Text.RichText
+                  textFormat: root.linkRanges(root.rowText(index)).length ? Text.PlainText : Text.RichText
                   elide: Text.ElideRight
-                  text: root.withEmojiFont(root.rowText(index))
+                  text: root.linkRanges(root.rowText(index)).length ? root.rowText(index) : root.withEmojiFont(root.rowText(index))
                   color: index === root.selected ? root.selectedText : root.foreground
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.body
@@ -1054,22 +1139,78 @@ Item {
                       id: bodyText
                       x: Style.space(10)
                       y: Style.space(7)
-                      width: Math.min(measure.implicitWidth, transcript.width * 0.62)
-                      wrapMode: Text.Wrap
-                      textFormat: Text.RichText
-                      text: root.withEmojiFont(body)
+                      width: Math.min(measure.implicitWidth, Math.max(1, transcript.width * 0.62))
+                      wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                      textFormat: Text.PlainText
+                      text: body
                       color: direction === "out" ? root.selectedText : root.foreground
-                      linkColor: color
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.body
-                      onLinkActivated: function(link) { root.openLink(link) }
+
+                      Repeater {
+                        model: bodyText.underlines
+                        delegate: Rectangle {
+                          x: modelData.x
+                          y: modelData.y
+                          width: modelData.w
+                          height: 1
+                          color: bodyText.color
+                        }
+                      }
+
+                      TextEdit {
+                        id: hit
+                        opacity: 0
+                        enabled: false
+                        width: bodyText.width
+                        height: bodyText.implicitHeight
+                        text: body
+                        textFormat: Text.PlainText
+                        wrapMode: bodyText.wrapMode
+                        readOnly: true
+                        cursorVisible: false
+                        activeFocusOnPress: false
+                        selectByMouse: false
+                        font.family: bodyText.font.family
+                        font.pixelSize: bodyText.font.pixelSize
+                      }
+
+                      property var underlines: []
+                      function refreshUnderlines() {
+                        if (width < 2)
+                          return
+                        var ranges = root.linkRanges(body)
+                        var drawn = []
+                        for (var r = 0; r < ranges.length; r++) {
+                          var pos = ranges[r].start
+                          var end = ranges[r].end
+                          while (pos < end) {
+                            var rect = hit.positionToRectangle(pos)
+                            var lineY = rect.y
+                            var linePos = pos
+                            var right = rect.x
+                            while (linePos < end) {
+                              var step = hit.positionToRectangle(linePos)
+                              if (linePos > pos && Math.abs(step.y - lineY) > 1)
+                                break
+                              right = step.x + Math.max(step.width, 1)
+                              linePos++
+                            }
+                            drawn.push({ x: rect.x, y: rect.y + rect.height - 1, w: Math.max(1, right - rect.x) })
+                            if (linePos <= pos)
+                              break
+                            pos = linePos
+                          }
+                        }
+                        underlines = drawn
+                      }
+                      onWidthChanged: Qt.callLater(refreshUnderlines)
+                      Component.onCompleted: Qt.callLater(refreshUnderlines)
 
                       MouseArea {
                         anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: bodyText.hoveredLink ? Qt.PointingHandCursor : Qt.ArrowCursor
                         onClicked: function(mouse) {
-                          var link = bodyText.linkAt(mouse.x, mouse.y)
+                          var link = root.hrefAt(body, hit.positionAt(mouse.x, mouse.y))
                           if (link)
                             root.openLink(link)
                         }
