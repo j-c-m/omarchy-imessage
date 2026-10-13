@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Background process for the iMsg plugin.
+"""Background process for the tMsg plugin.
 
 The overlay talks to this process with one JSON object per line on
 stdin. Events go out as JSON lines on stdout. Stderr is only for

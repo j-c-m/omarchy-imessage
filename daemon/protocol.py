@@ -434,7 +434,7 @@ def tui_launcher() -> str:
 
 def notification_command(title: str, body: str, thread: str, program: str = "omarchy-notification-send") -> list[str]:
     """Desktop notification whose left click opens the terminal screen."""
-    args = [program, "--app-name=iMsg", "-u", "normal", title]
+    args = [program, "--app-name=tMsg", "-u", "normal", title]
     text = (body or "").strip()
     if text:
         args.append(text[:120])

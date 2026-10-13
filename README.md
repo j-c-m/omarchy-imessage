@@ -1,11 +1,11 @@
-# iMsg
+# tMsg
 
 Read and send texts from a nearby iPhone, in a terminal screen opened from the Omarchy bar. The phone stays in charge. This computer never asks for an Apple ID or an iCloud password. It uses two ordinary Bluetooth profiles:
 
 - **MAP** carries the texts. Carrier SMS and iMessage both arrive as plain text. The phone chooses the route.
 - **PBAP** carries contact names, so you can pick a person instead of typing a number.
 
-Click **iMsg** on the right side of the bar. That opens the terminal screen. If it is already open, that window is focused.
+Click **t💬** on the right side of the bar. That opens the terminal screen. If it is already open, that window is focused.
 
 ## Install
 
@@ -67,7 +67,7 @@ If the status line says the phone is already in a message session, another compu
 | `t` | Include the message text in desktop notifications. Press again to turn it off. Not while writing a reply or filtering |
 | Escape | Step back, then quit |
 
-The bar shows `iMsg`, and a count when something is unread. A desktop notification uses the contact's name. It does not include the message text unless you pressed `t`.
+The bar shows `t💬`, and a count when something is unread. The program name is tMsg. A desktop notification uses the contact's name. It does not include the message text unless you pressed `t`.
 
 ## What you will not see
 

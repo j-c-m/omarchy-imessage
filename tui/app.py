@@ -1,4 +1,4 @@
-"""iMsg in the terminal.
+"""tMsg in the terminal.
 
     python3 -m tui
     python3 -m tui --standalone
@@ -94,7 +94,7 @@ class Transcript(RichLog):
 
 
 class ImsgApp(App):
-    TITLE = "iMsg"
+    TITLE = "tMsg"
     DEFAULT_CSS = """
     #status, #hint {
         height: 1;

@@ -1,1 +1,1 @@
-"""Terminal UI for iMsg. It is a client of the running messages daemon."""
+"""Terminal UI for tMsg. It is a client of the running messages daemon."""

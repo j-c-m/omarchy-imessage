@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "io.github.nikolaos-gkionis.messages",
-  "name": "iMsg",
+  "name": "tMsg",
   "version": "1.0.0",
   "author": "nikolaos",
   "license": "MIT",
@@ -14,7 +14,7 @@
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "iMsg",
+    "displayName": "tMsg",
     "description": "Unread iPhone texts",
     "category": "Communication",
     "allowMultiple": false,

@@ -198,7 +198,7 @@ class NotificationTests(unittest.TestCase):
 
     def test_left_click_opens_the_tui_on_that_conversation(self):
         args = protocol.notification_command("Ada Lovelace", "hello", "tel:+15550001111")
-        self.assertEqual(args[:5], ["omarchy-notification-send", "--app-name=iMsg", "-u", "normal", "Ada Lovelace"])
+        self.assertEqual(args[:5], ["omarchy-notification-send", "--app-name=tMsg", "-u", "normal", "Ada Lovelace"])
         self.assertEqual(args[5], "hello")
         self.assertEqual(args[6:], [
             "--exec",

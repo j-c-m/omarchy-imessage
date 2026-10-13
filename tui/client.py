@@ -41,7 +41,7 @@ async def connect(standalone: bool = False) -> SocketClient:
     except (FileNotFoundError, ConnectionRefusedError, OSError):
         if not standalone:
             raise OSError(
-                "iMsg daemon is not listening. Restart the shell so the plugin starts it, "
+                "tMsg daemon is not listening. Restart the shell so the plugin starts it, "
                 "or run with --standalone."
             )
     process = await asyncio.create_subprocess_exec(
@@ -62,4 +62,4 @@ async def connect(standalone: bool = False) -> SocketClient:
             return SocketClient(reader, writer)
         except (FileNotFoundError, ConnectionRefusedError, OSError):
             await asyncio.sleep(0.05)
-    raise OSError("iMsg daemon did not open its socket.")
+    raise OSError("tMsg daemon did not open its socket.")

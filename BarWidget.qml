@@ -19,9 +19,9 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.unread > 0 ? ("iMsg " + root.unread) : "iMsg"
+    text: root.unread > 0 ? ("t💬 " + root.unread) : "t💬"
     active: root.unread > 0
-    tooltipText: root.unread > 0 ? (root.unread + " unread") : "Open iMsg"
+    tooltipText: root.unread > 0 ? (root.unread + " unread") : "Open tMsg"
     onPressed: function(buttonCode) {
       if (buttonCode !== Qt.LeftButton)
         return
