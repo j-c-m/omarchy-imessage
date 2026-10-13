@@ -67,7 +67,7 @@ If the status line says the phone is already in a message session, another compu
 | `/` | Start filtering the list you are in. Escape clears it |
 | `y` / `n` | Accept or reject the pairing code |
 | `p` | Explicit pairing, only on the phone list |
-| `t` | On the permission screen, include the message text in desktop notifications. This stays off until you turn it on |
+| `t` | Include the message text in desktop notifications. Press again to turn it off. Not while writing a reply, filtering, or picking an emoji |
 | `?` | Show every hint |
 | Escape | Step back, then close the card |
 

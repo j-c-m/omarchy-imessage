@@ -24,6 +24,7 @@ Item {
   property int selected: 0
   property string filterText: ""
   property bool filterOn: false
+  property string notice: ""
   property string draft: ""
   property bool composeFocus: false
 
@@ -634,6 +635,14 @@ Item {
     return parseInt(value.substring(8, 10), 10) + " " + monthName + "  " + hm
   }
 
+  function toggleNotify() {
+    if (!root.svc)
+      return
+    var next = !root.svc.notifyBody
+    root.svc.setNotifyBody(next)
+    root.notice = next ? "notification text on" : "notification text off"
+  }
+
   function stateLabel() {
     if (!root.svc)
       return "starting"
@@ -788,6 +797,15 @@ Item {
             return
           }
 
+          var allowNotifyToggle = event.key === Qt.Key_T && !root.composeFocus && !root.filterOn && root.screen !== "emoji" && root.svc
+          if (!allowNotifyToggle)
+            root.notice = ""
+          else {
+            root.toggleNotify()
+            event.accepted = true
+            return
+          }
+
           if (root.screen === "code") {
             if (event.key === Qt.Key_Y && root.svc) root.svc.confirm(true)
             else if (event.key === Qt.Key_N && root.svc) root.svc.confirm(false)
@@ -796,7 +814,6 @@ Item {
           }
 
           if (root.screen === "checklist") {
-            if (event.key === Qt.Key_T && root.svc) root.svc.setNotifyBody(!root.svc.notifyBody)
             event.accepted = true
             return
           }
@@ -914,6 +931,8 @@ Item {
                 return "/" + root.filterText
               if (root.screen === "code")
                 return "Pairing code  " + (root.svc ? root.svc.pairCode : "")
+              if (root.notice)
+                return root.notice
               if (root.screen === "checklist")
                 return "On the iPhone open Bluetooth, tap this computer, then turn on Show Message Notifications and Sync Contacts."
               if (root.screen === "emoji")
