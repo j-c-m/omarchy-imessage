@@ -32,6 +32,16 @@ omarchy plugin add https://github.com/Nikolaos-Gkionis/omarchy-imessage.git --en
 
 While you are developing this checkout, link it and enable that id. `omarchy plugin validate` rejects a plugin folder that is itself a symlink, so validate this directory, not the link.
 
+## Terminal
+
+`tui` is the same daemon with a terminal screen instead of the Qt card. Restart the shell once so the daemon opens its socket, then:
+
+```sh
+python3 -m tui
+```
+
+Install `python-textual` first. `--standalone` starts a daemon when the plugin is not running. Do not use it while the plugin's daemon is already connected to the phone.
+
 ```sh
 omarchy plugin validate .
 mkdir -p ~/.config/omarchy/plugins

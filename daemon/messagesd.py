@@ -17,8 +17,11 @@ import json
 import os
 import sys
 
+from hub import Hub, socket_path
 from protocol import address_from_thread, normalize_phone, notification_command, notification_title, public_error
 from store import Store
+
+hub = Hub()
 
 _MAC = __import__("re").compile(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
 
@@ -36,9 +39,8 @@ def spawn(coro) -> asyncio.Task:
 
 
 def emit(event: dict) -> None:
-    """Send one event to the shell. The caller must already have removed secrets from logs."""
-    sys.stdout.write(json.dumps(event, ensure_ascii=False) + "\n")
-    sys.stdout.flush()
+    """Send one event to the shell and to any terminal UI on the socket."""
+    hub.publish(event)
 
 
 def log_state(state: str) -> None:
@@ -248,6 +250,13 @@ async def amain_wrapped() -> None:
         log_state(session.state)
     emit({"event": "threads", "threads": store.threads()})
 
+    async def on_line(text: str) -> None:
+        if _is_immediate(text, session):
+            return
+        spawn(handle(text, store, session))
+
+    await hub.listen(socket_path(), on_line)
+
     loop = asyncio.get_running_loop()
     reader = asyncio.StreamReader()
     protocol = asyncio.StreamReaderProtocol(reader)
@@ -262,9 +271,10 @@ async def amain_wrapped() -> None:
         text = line.decode("utf-8", errors="replace").strip()
         if not text:
             continue
-        if _is_immediate(text, session):
-            continue
-        spawn(handle(text, store, session))
+        await on_line(text)
+    # The terminal UI starts this process with no stdin. The socket keeps it up.
+    if hub.server is not None:
+        await hub.server.serve_forever()
     store.close()
 
 
