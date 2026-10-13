@@ -69,6 +69,13 @@ Item {
   // A window in the middle, not a sheet that covers the desktop.
   property int cardWidth: Math.min(Style.space(760), Math.max(Style.space(520), panel.width * 0.52))
   property int cardHeight: Math.min(Style.space(480), Math.max(Style.space(340), panel.height * 0.52))
+  // Width only. The measured height must not depend on the card height,
+  // or the layout loop freezes the desktop.
+  readonly property int draftInnerWidth: Math.max(40, Math.min(cardWidth, panel.width - Style.gapsOut * 2) - card.contentLeftInset - card.contentRightInset)
+  readonly property int draftLimit: draftOneLine.implicitHeight * 5
+  readonly property int composeGrow: root.composeFocus
+    ? Math.max(0, Math.min(draftMeasure.implicitHeight, root.draftLimit) - draftOneLine.implicitHeight)
+    : 0
 
   function open(payloadJson) {
     root.opened = true
@@ -385,8 +392,20 @@ Item {
     root.startReply()
   }
 
+  function revealCaret() {
+    if (!root.composeFocus)
+      return
+    var rect = composer.cursorRectangle
+    var top = rect.y
+    var bottom = rect.y + rect.height
+    if (top < draftBox.contentY)
+      draftBox.contentY = top
+    else if (bottom > draftBox.contentY + draftBox.height)
+      draftBox.contentY = bottom - draftBox.height
+  }
+
   function startReply() {
-    // The hidden text field is what actually receives letters and paste.
+    // The text field receives letters, paste, and the arrow keys.
     composer.clear()
     root.draft = ""
     root.caretOn = true
@@ -679,6 +698,27 @@ Item {
       root.rebuildShown()
   }
 
+  Text {
+    id: draftOneLine
+    visible: false
+    width: Math.max(40, root.draftInnerWidth - draftPrompt.implicitWidth)
+    textFormat: Text.PlainText
+    text: " "
+    font.family: root.fontFamily
+    font.pixelSize: Style.font.body
+  }
+
+  Text {
+    id: draftMeasure
+    visible: false
+    width: Math.max(40, root.draftInnerWidth - draftPrompt.implicitWidth)
+    wrapMode: Text.Wrap
+    textFormat: Text.PlainText
+    font.family: root.fontFamily
+    font.pixelSize: Style.font.body
+    text: root.draft.length ? root.draft : " "
+  }
+
   PanelWindow {
     id: panel
     visible: root.opened
@@ -718,7 +758,7 @@ Item {
     BorderSurface {
       id: card
       width: Math.min(root.cardWidth, panel.width - Style.gapsOut * 2)
-      height: Math.min(root.cardHeight, panel.height - Style.gapsOut * 2)
+      height: Math.min(root.cardHeight + root.composeGrow, panel.height - Style.gapsOut * 2)
       radius: root.cornerRadius > 0 ? root.cornerRadius : Style.cornerRadius
       anchors.centerIn: parent
       color: root.background
@@ -733,36 +773,6 @@ Item {
         focus: !root.composeFocus
 
         Keys.priority: Keys.BeforeItem
-        TextInput {
-          id: composer
-          // Invisible on purpose. Key presses land here so an emoji, a
-          // composed character, or a paste becomes part of the reply.
-          opacity: 0
-          width: 1
-          height: 1
-          focus: root.composeFocus
-          inputMethodHints: Qt.ImhNoAutoUppercase
-          onTextChanged: root.draft = text
-          // BeforeItem runs before the text field's own shortcuts. Ctrl+E
-          // would otherwise jump to the end of the line and never open emojis.
-          Keys.priority: Keys.BeforeItem
-          Keys.onPressed: function(event) {
-            var ctrl = (event.modifiers & Qt.ControlModifier) && !(event.modifiers & Qt.AltModifier)
-            if (ctrl && event.key === Qt.Key_E) {
-              root.openEmoji()
-              event.accepted = true
-              return
-            }
-            if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && !(event.modifiers & Qt.ControlModifier)) {
-              root.sendDraft()
-              event.accepted = true
-              return
-            }
-            // Escape is handled by the window shortcut above, so a
-            // reply in progress cannot swallow the key.
-          }
-        }
-
         Keys.onPressed: function(event) {
           var printable = root.typingText(event)
 
@@ -807,14 +817,17 @@ Item {
           }
 
           if (root.composeFocus) {
-            // Ctrl+E opens the emoji list. Enter sends. Other keys, including
-            // paste, stay with the hidden text field.
-            if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_E) root.openEmoji()
-            else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) root.sendDraft()
-            else {
-              return
+            // Ctrl+E opens the emoji list. Enter sends. Arrows and letters
+            // stay with the text field so the cursor can move.
+            if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_E) {
+              root.openEmoji()
+              event.accepted = true
+            } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+              root.sendDraft()
+              event.accepted = true
+            } else {
+              event.accepted = false
             }
-            event.accepted = true
             return
           }
 
@@ -1137,15 +1150,65 @@ Item {
             }
           }
 
-          Text {
+          Flickable {
+            id: draftBox
             Layout.fillWidth: true
             visible: root.composeFocus
-            textFormat: Text.RichText
-            elide: Text.ElideRight
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.body
-            text: root.withEmojiFont("> " + root.draft + (root.caretOn ? "▌" : " "))
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            flickableDirection: Flickable.VerticalFlick
+            interactive: draftMeasure.implicitHeight > height
+            contentWidth: root.draftInnerWidth
+            contentHeight: draftMeasure.implicitHeight
+            Layout.preferredHeight: Math.min(draftMeasure.implicitHeight, root.draftLimit)
+
+            Row {
+              width: root.draftInnerWidth
+              height: Math.max(draftMeasure.implicitHeight, draftOneLine.implicitHeight)
+              spacing: 0
+
+              Text {
+                id: draftPrompt
+                text: "> "
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+              }
+
+              TextEdit {
+                id: composer
+                width: Math.max(40, root.draftInnerWidth - draftPrompt.implicitWidth)
+                height: Math.max(draftMeasure.implicitHeight, draftOneLine.implicitHeight)
+                focus: root.composeFocus
+                wrapMode: Text.Wrap
+                textFormat: Text.PlainText
+                selectByMouse: true
+                color: root.foreground
+                selectionColor: root.selectedBackground
+                selectedTextColor: root.selectedText
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                inputMethodHints: Qt.ImhNoAutoUppercase
+                onTextChanged: root.draft = text
+                onCursorPositionChanged: Qt.callLater(root.revealCaret)
+                // BeforeItem runs before the field's own shortcuts. Ctrl+E
+                // would otherwise jump to the end of the line.
+                Keys.priority: Keys.BeforeItem
+                Keys.onPressed: function(event) {
+                  event.accepted = false
+                  var ctrl = (event.modifiers & Qt.ControlModifier) && !(event.modifiers & Qt.AltModifier)
+                  if (ctrl && event.key === Qt.Key_E) {
+                    root.openEmoji()
+                    event.accepted = true
+                    return
+                  }
+                  if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && !(event.modifiers & Qt.ControlModifier)) {
+                    root.sendDraft()
+                    event.accepted = true
+                  }
+                }
+              }
+            }
           }
 
           Rectangle {
