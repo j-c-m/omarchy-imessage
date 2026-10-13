@@ -105,6 +105,24 @@ class AttachmentTests(unittest.TestCase):
         self.assertEqual(protocol.present_message("", True), "attachment omitted")
 
 
+class NameOnlyVCardTests(unittest.TestCase):
+    def test_family_and_given_name_are_shown(self):
+        raw = "BEGIN:VCARD\r\nN:Rivera;Sam;;;\r\nTEL;TYPE=CELL:+15557654321\r\nEND:VCARD\r\n"
+        people = protocol.parse_vcards(raw)
+        self.assertEqual(people[0]["name"], "Sam Rivera")
+
+    def test_a_folded_name_stays_whole(self):
+        raw = "BEGIN:VCARD\r\nFN:Sam \r\n Rivera\r\nTEL:+15557654321\r\nEND:VCARD\r\n"
+        people = protocol.parse_vcards(raw)
+        self.assertEqual(people[0]["name"], "Sam Rivera")
+        self.assertEqual(people[0]["phones"], ["+15557654321"])
+
+    def test_a_quoted_name_is_decoded(self):
+        raw = "BEGIN:VCARD\r\nFN;ENCODING=QUOTED-PRINTABLE:Sam=20Rivera\r\nTEL:+15557654321\r\nEND:VCARD\r\n"
+        people = protocol.parse_vcards(raw)
+        self.assertEqual(people[0]["name"], "Sam Rivera")
+
+
 class PlainVCardTests(unittest.TestCase):
     def test_reads_name_phone_and_email(self):
         raw = (

@@ -3,7 +3,7 @@
 This computer talks to a paired iPhone over two Bluetooth profiles.
 
 - MAP carries the texts. OBEX `CreateSession` with target `map` opens that channel.
-- PBAP carries contacts. OBEX `CreateSession` with target `pbap` opens that channel.
+- PBAP carries contacts. OBEX `CreateSession` with target `pbap` opens that channel. The pull asks for names and numbers, not photos, and waits for the whole book. A card whose name is only in the `N` field is kept.
 
 It does not connect as a headset or a speaker. It does not change the adapter class. The ANCS solicit asks iOS to show the message switch. The program does not subscribe to notification contents.
 

@@ -161,7 +161,9 @@ class Store:
 
         The phone book arrives only after Sync Contacts is on. Until then,
         the person who texted you can still be chosen for a reply.
+        An empty query is the whole book. A typed query stays short.
         """
+        cap = limit if query.strip() else max(limit, 10000)
         like = f"%{query.strip().lower()}%"
         rows = self._db.execute(
             """
@@ -170,7 +172,7 @@ class Store:
             ORDER BY name COLLATE NOCASE, address
             LIMIT ?
             """,
-            (like, like, limit),
+            (like, like, cap),
         ).fetchall()
         found = [{"name": row["name"], "address": row["address"], "kind": row["kind"]} for row in rows]
         seen = {row["address"] for row in found}
@@ -188,7 +190,7 @@ class Store:
             kind = "email" if "@" in address else "tel"
             found.append({"name": name, "address": address, "kind": kind})
             seen.add(address)
-            if len(found) >= limit:
+            if len(found) >= cap:
                 break
         return found
 

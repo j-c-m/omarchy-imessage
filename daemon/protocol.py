@@ -7,6 +7,7 @@ Bluetooth Message Access Profile uses to hand one text to a phone.
 
 from __future__ import annotations
 
+import quopri
 import re
 
 # One thousand characters is long enough for a real text and far below
@@ -309,19 +310,59 @@ def present_message(body: str, has_attachment: bool) -> str:
     return text
 
 
+def _vcard_field(key: str) -> str:
+    """Field name from `item1.TEL;TYPE=CELL` or `FN;CHARSET=UTF-8`."""
+    field = key.split(";")[0].upper()
+    if "." in field:
+        field = field.rsplit(".", 1)[-1]
+    return field
+
+
+def _vcard_text(key: str, value: str) -> str:
+    """Plain text from a vCard value. iOS still quotes some names."""
+    text = value.strip()
+    if "QUOTED-PRINTABLE" not in key.upper():
+        return text
+    try:
+        return quopri.decodestring(text.encode("utf-8")).decode("utf-8", "replace").strip()
+    except Exception:
+        return text
+
+
+def _name_from_n(value: str) -> str:
+    """Display name from `Family;Given;Additional;Prefix;Suffix`."""
+    parts = [part.strip() for part in value.split(";")]
+    while len(parts) < 5:
+        parts.append("")
+    family, given, additional, prefix, suffix = parts[:5]
+    return " ".join(piece for piece in (prefix, given, additional, family, suffix) if piece)
+
+
 def parse_vcards(raw: str) -> list[dict]:
     """Read names, phones, and emails out of a PBAP vCard file.
 
     PBAP is the Bluetooth phone book. Each card can carry several numbers.
     Callers still run those numbers through the E.164 helpers before sending.
+    A card with only an N field still gets a name. Photo bytes are skipped.
     """
     people = []
     current = None
+    buf = ""
+    skip_fold = False
     for raw_line in raw.splitlines():
-        # A line that starts with a space continues the line above.
-        # Contact photos use that form and are not names or numbers.
         if raw_line.startswith((" ", "\t")):
+            folded = raw_line[1:]
+            # A photo is folded onto the next lines. It is not part of the
+            # phone number above it.
+            if folded.upper().startswith("PHOTO") or skip_fold:
+                skip_fold = True
+                continue
+            buf += folded
             continue
+        if buf:
+            _apply_vcard_line(current, buf)
+        buf = ""
+        skip_fold = False
         line = raw_line.strip()
         upper = line.upper()
         if upper.startswith("BEGIN:VCARD"):
@@ -332,22 +373,36 @@ def parse_vcards(raw: str) -> list[dict]:
                 people.append(current)
             current = None
             continue
-        if current is None or ":" not in line:
+        if ":" in line and _vcard_field(line.split(":", 1)[0]) == "PHOTO":
+            skip_fold = True
             continue
-        key, value = line.split(":", 1)
-        # iOS writes item1.TEL and item2.EMAIL. The part after the dot
-        # is the real field name.
-        field = key.split(";")[0].upper()
-        if "." in field:
-            field = field.rsplit(".", 1)[-1]
-        value = value.strip()
-        if field == "FN" and value:
-            current["name"] = value
-        elif field == "TEL" and value:
-            current["phones"].append(value)
-        elif field == "EMAIL" and value:
-            current["emails"].append(value)
+        buf = raw_line
+    if buf:
+        _apply_vcard_line(current, buf)
     return people
+
+
+def _apply_vcard_line(current: dict | None, raw_line: str) -> None:
+    if current is None:
+        return
+    line = raw_line.strip()
+    if ":" not in line:
+        return
+    key, value = line.split(":", 1)
+    field = _vcard_field(key)
+    value = _vcard_text(key, value)
+    if not value or field == "PHOTO":
+        return
+    if field == "FN":
+        current["name"] = value
+    elif field == "N" and not current["name"]:
+        current["name"] = _name_from_n(value)
+    elif field == "NICKNAME" and not current["name"]:
+        current["name"] = value.split(",")[0].strip()
+    elif field == "TEL":
+        current["phones"].append(value)
+    elif field == "EMAIL":
+        current["emails"].append(value)
 
 
 def notification_title(sender: str) -> str:

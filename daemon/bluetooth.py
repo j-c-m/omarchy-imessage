@@ -729,7 +729,11 @@ class BluetoothSession:
         The returned object is a transfer. It stays "queued" until the
         phone finishes sending. When the object disappears, the file is ready.
         """
-        for _ in range(50):
+        return await self._wait_transfer_rounds(transfer_path, 50)
+
+    async def _wait_transfer_rounds(self, transfer_path: str, rounds: int) -> str:
+        """Wait until a transfer finishes. A vanished object means the file is ready."""
+        for _ in range(rounds):
             try:
                 intro = await self._session_bus.introspect("org.bluez.obex", transfer_path)
                 obj = self._session_bus.get_proxy_object("org.bluez.obex", transfer_path, intro)
@@ -739,10 +743,11 @@ class BluetoothSession:
                     )
                 )
             except Exception:
-                return
+                return "complete"
             if str(status) in ("complete", "error"):
-                return
+                return str(status)
             await asyncio.sleep(0.1)
+        return "timeout"
 
     async def _read_bmessage(self, target: Path) -> str:
         """Read a downloaded text, retrying while the file is still empty."""
@@ -843,17 +848,34 @@ class BluetoothSession:
             "org.bluez.obex", self._pbap_path, "org.bluez.obex.PhonebookAccess1", self._session_bus
         )
         target = runtime_dir() / "contacts.vcf"
+        # Photos make the book huge, and a short wait then saves only the
+        # first cards. Names and numbers are enough to pick a person.
+        filters = {
+            "Format": Variant("s", "vcard30"),
+            "MaxCount": Variant("q", 65535),
+            "Fields": Variant("as", ["FN", "N", "TEL", "EMAIL", "NICKNAME"]),
+        }
         try:
             await phonebook.call_select("int", "pb")
-            # PullAll returns a transfer, same as a message download. The file
-            # is empty until that transfer finishes.
-            result = await phonebook.call_pull_all(str(target), {"Format": Variant("s", "vcard30")})
+            try:
+                result = await phonebook.call_pull_all(str(target), filters)
+            except Exception:
+                result = await phonebook.call_pull_all(
+                    str(target),
+                    {"Format": Variant("s", "vcard30"), "MaxCount": Variant("q", 65535)},
+                )
         except Exception:
             await self._drop_pbap()
             return
         transfer = str(result[0]) if isinstance(result, (list, tuple)) and result else ""
-        if transfer:
-            await self._wait_transfer(transfer)
+        # A full book can take longer than one text. A timed-out file is
+        # only the first slice, so it must not replace the saved list.
+        if transfer and await self._wait_transfer_rounds(transfer, 600) == "timeout":
+            try:
+                target.unlink()
+            except OSError:
+                pass
+            return
         try:
             raw = target.read_text(encoding="utf-8", errors="replace") if target.exists() else ""
         except OSError:
