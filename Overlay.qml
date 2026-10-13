@@ -41,6 +41,9 @@ Item {
   property string lastOpened: ""
   property string pendingThread: ""
   property bool openAfterDelete: false
+  property bool snapToLatest: false
+  property int snapTries: 0
+  property real lastSnapHeight: -1
   property bool caretOn: true
 
   Timer {
@@ -344,6 +347,14 @@ Item {
     if (!same)
       root.svc.loadMessages(row.key)
     root.svc.markRead(row.key)
+    root.armLatest()
+  }
+
+  function armLatest() {
+    root.snapToLatest = true
+    root.snapTries = 0
+    root.lastSnapHeight = -1
+    snapTimer.restart()
   }
 
   function deleteSelected() {
@@ -755,14 +766,22 @@ Item {
     onLoaded: root.loadEmojis(text())
   }
 
+  Timer {
+    id: snapTimer
+    interval: 30
+    onTriggered: transcript.revealLatest()
+  }
+
   Connections {
     target: root.svc
     ignoreUnknownSignals: true
     function onStateChanged() { if (root.opened) root.followState(false) }
     function onPairCodeChanged() { if (root.opened && root.svc && root.svc.pairCode) root.screen = "code" }
     function onMessageRevisionChanged() {
-      if (root.opened && root.screen === "inbox" && root.lastOpened && root.svc)
-        root.svc.markRead(root.lastOpened)
+      if (!(root.opened && root.screen === "inbox" && root.lastOpened && root.svc))
+        return
+      root.svc.markRead(root.lastOpened)
+      root.armLatest()
     }
     function onThreadRevisionChanged() {
       if (root.screen !== "inbox")
@@ -1096,9 +1115,30 @@ Item {
               clip: true
               model: root.svc ? root.svc.messages : 0
               boundsBehavior: Flickable.StopAtBounds
-              // After the model has finished changing. Doing this inside the
-              // count change re-enters layout while a new conversation is built.
-              onCountChanged: if (count > 0) Qt.callLater(positionViewAtEnd)
+              // The bubble height arrives after the row exists. Scrolling in
+              // this signal, before that height, was leaving the newest text
+              // below the fold and could re-enter layout.
+              onCountChanged: if (count > 0 && root.snapToLatest) snapTimer.restart()
+              onDraggingChanged: if (dragging) root.snapToLatest = false
+              // A link bubble grows after the first layout. Keep pulling to
+              // the newest text until the content height stays put.
+              function revealLatest() {
+                if (!root.snapToLatest || count < 1) {
+                  root.snapToLatest = false
+                  return
+                }
+                var bottom = Math.max(0, contentHeight - height)
+                if (Math.abs(contentY - bottom) > 1)
+                  contentY = bottom
+                root.snapTries += 1
+                var settled = contentHeight === root.lastSnapHeight && Math.abs(contentY - bottom) <= 1
+                root.lastSnapHeight = contentHeight
+                if (!settled && root.snapTries < 12) {
+                  snapTimer.restart()
+                  return
+                }
+                root.snapToLatest = false
+              }
 
               delegate: Item {
                 required property string body
@@ -1124,8 +1164,11 @@ Item {
                 property int textHeight: 0
                 function syncTextHeight() {
                   var next = Math.ceil(linked ? linkText.implicitHeight : emojiText.implicitHeight)
-                  if (next > 0 && next !== textHeight)
+                  if (next > 0 && next !== textHeight) {
                     textHeight = next
+                    if (root.snapToLatest)
+                      snapTimer.restart()
+                  }
                 }
                 onTextWidthChanged: Qt.callLater(syncTextHeight)
                 onLinkedChanged: Qt.callLater(syncTextHeight)
