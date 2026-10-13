@@ -187,8 +187,8 @@ async def dispatch(name: str, command: dict, store: Store, session) -> None:
             address = address_from_thread(str(command.get("thread") or ""))
         if not address:
             raise ValueError("Choose a contact or a conversation first.")
-        await session.send(address, body)
-        emit({"event": "sent", "thread": str(command.get("thread") or "")})
+        thread = await session.send(address, body)
+        emit({"event": "sent", "thread": thread})
         return
 
     raise ValueError("Unknown command.")

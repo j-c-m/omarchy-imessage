@@ -417,7 +417,7 @@ class BluetoothSession:
 
         self._advert_stop = self._track(_stop())
 
-    async def send(self, address: str, body: str) -> None:
+    async def send(self, address: str, body: str) -> str:
         async with self.lock:
             if not self._map_path:
                 raise RuntimeError("The phone is not connected for messages yet.")
@@ -444,7 +444,7 @@ class BluetoothSession:
                 except OSError:
                     pass
             label = self.store.label_for(value)
-            self.store.upsert_message(
+            row, _created = self.store.upsert_message(
                 external_id=f"local-{time.time_ns()}",
                 address=value,
                 body=body,
@@ -456,6 +456,7 @@ class BluetoothSession:
                 peer_label=label,
             )
             self._emit_threads()
+            return str(row["thread"])
 
     async def mark_read(self, thread: str) -> None:
         handles = self.store.mark_thread_read(thread)

@@ -22,6 +22,9 @@ Item {
   property bool notifyBody: false
   property bool bluetoothReady: false
   property string lastError: ""
+  property int errorRevision: 0
+  property string sentThread: ""
+  property int sentRevision: 0
   property int threadRevision: 0
   property int messageRevision: 0
   property int deviceRevision: 0
@@ -117,11 +120,12 @@ Item {
       root.state = "pairing"
     } else if (event.event === "error") {
       root.lastError = event.message || "Something went wrong."
+      root.errorRevision += 1
     } else if (event.event === "threads") {
       root.fill(threadModel, event.threads, ["key", "label", "preview", "unread", "timestamp"])
       root.threadRevision += 1
     } else if (event.event === "messages") {
-      if (!root.activeThread || event.thread === root.activeThread) {
+      if (root.activeThread && event.thread === root.activeThread) {
         root.fill(messageModel, event.messages, ["id", "thread", "label", "body", "direction", "timestamp", "read"])
         root.messageRevision += 1
       }
@@ -136,6 +140,11 @@ Item {
       root.fill(contactModel, event.contacts, ["name", "address", "kind"])
       root.contactRevision += 1
     } else if (event.event === "sent") {
+      var sentKey = event.thread || ""
+      if (sentKey)
+        root.activeThread = sentKey
+      root.sentThread = sentKey
+      root.sentRevision += 1
       root.loadThreads()
       if (root.activeThread)
         root.loadMessages(root.activeThread)

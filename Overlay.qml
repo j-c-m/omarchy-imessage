@@ -35,6 +35,7 @@ Item {
   property bool helpOn: false
   property string toAddress: ""
   property string toLabel: ""
+  property bool sendPending: false
   property string lastOpened: ""
   property bool caretOn: true
 
@@ -437,8 +438,44 @@ Item {
     root.composeFocus = true
   }
 
+  function selectThread(thread) {
+    if (!thread)
+      return
+    for (var i = 0; i < shownModel.count; i++) {
+      var row = shownModel.get(i)
+      if (row && row.key === thread) {
+        root.selected = i
+        if (leftList)
+          leftList.positionViewAtIndex(i, ListView.Contain)
+        return
+      }
+    }
+  }
+
+  function acceptSend() {
+    if (!root.sendPending || !root.svc)
+      return
+    var thread = root.svc.sentThread || ""
+    root.sendPending = false
+    composer.clear()
+    root.draft = ""
+    root.toAddress = ""
+    root.toLabel = ""
+    root.composeFocus = false
+    root.screen = "inbox"
+    root.rebuildShown()
+    root.selectThread(thread)
+  }
+
+  function failSend() {
+    if (!root.sendPending)
+      return
+    root.sendPending = false
+    root.composeFocus = true
+  }
+
   function sendDraft() {
-    if (!root.svc)
+    if (!root.svc || root.sendPending)
       return
     var body = root.draft
     if (!body.trim())
@@ -448,12 +485,10 @@ Item {
       var row = shownModel.get(root.selected)
       thread = row ? row.key : ""
     }
+    root.svc.lastError = ""
+    root.sendPending = true
+    root.composeFocus = true
     root.svc.sendText(thread, root.toAddress, body)
-    composer.clear()
-    root.draft = ""
-    root.toAddress = ""
-    root.toLabel = ""
-    root.composeFocus = false
   }
 
   function withEmojiFont(value) {
@@ -580,6 +615,8 @@ Item {
     function onThreadRevisionChanged() { if (root.screen === "inbox") root.rebuildShown() }
     function onDeviceRevisionChanged() { if (root.screen === "setup") root.rebuildShown() }
     function onContactRevisionChanged() { if (root.screen === "contacts") root.selected = 0 }
+    function onSentRevisionChanged() { if (root.opened) root.acceptSend() }
+    function onErrorRevisionChanged() { if (root.opened) root.failSend() }
   }
 
   onScreenChanged: root.rebuildShown()
@@ -806,6 +843,8 @@ Item {
                 return root.emojiFilter ? ("Emoji  " + root.emojiFilter) : "Pick an emoji"
               if (root.screen === "contacts")
                 return "Choose who to text"
+              if (root.svc && root.svc.lastError)
+                return root.svc.lastError
               if (root.screen === "setup")
                 return root.svc && root.svc.state === "scanning" ? "Looking for your iPhone" : "Select your iPhone"
               return root.stateLabel() + (root.svc && root.svc.phoneName ? "  " + root.svc.phoneName : "")
