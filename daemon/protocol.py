@@ -314,6 +314,51 @@ def looks_like_attachment_payload(text: str) -> bool:
     return False
 
 
+def message_has_file(fields: dict | None, body: str = "") -> bool:
+    """True when a MAP listing or a body says a file came with the text.
+
+    Current BlueZ publishes AttachmentMimeTypes, not Attachment.
+    """
+    fields = fields or {}
+    mime = fields.get("AttachmentMimeTypes") or fields.get("AttachmentMime") or ""
+    if isinstance(mime, (list, tuple)):
+        mime = " ".join(str(part) for part in mime)
+    if fields.get("Attachment") or fields.get("AttachmentSize") or str(mime).strip():
+        return True
+    return looks_like_attachment_payload(body)
+
+
+def keep_words(raw: str, text: str, flagged: bool) -> tuple[str, bool]:
+    """Words to store, and whether the transcript should name a missing file.
+
+    A photo with no caption is a real bMessage whose text part is empty.
+    File bytes are not stored.
+    """
+    if looks_like_attachment_payload(text):
+        return "", True
+    if flagged:
+        return text, True
+    if raw and "BEGIN:BMSG" in raw.upper() and not text:
+        return "", True
+    return text, False
+
+
+def words_after_transfer(status: str, raw: str, text: str, flagged: bool) -> tuple[str, bool] | None:
+    """Words to store after a download attempt, or None to ask the phone again.
+
+    A timed-out plain text is not a photo. When the transfer never
+    finished and nothing says a file was attached, None keeps the row
+    incomplete so a later poll retries instead of freezing a placeholder.
+    """
+    if str(status) in ("timeout", "error") and not text and not flagged:
+        if not looks_like_attachment_payload(raw):
+            return None
+    words, flagged = keep_words(raw, text, flagged or looks_like_attachment_payload(raw))
+    if not words and not flagged:
+        return None
+    return words, flagged
+
+
 def present_message(body: str, has_attachment: bool) -> str:
     """Text the overlay is allowed to show.
 

@@ -36,9 +36,11 @@ from protocol import (
     is_audio_profile,
     normalize_email,
     parse_vcards,
+    message_has_file,
     present_message,
     public_error,
     thread_key,
+    words_after_transfer,
 )
 from store import Store, runtime_dir
 
@@ -51,6 +53,10 @@ _OBEX_CANDIDATES = (
     "/usr/libexec/bluetooth/obexd",
     "obexd",
 )
+# A timed-out download is not retried until this many seconds pass.
+# Otherwise every poll spends five seconds re-fetching the same photo
+# before it reaches the text that came after it.
+_STUCK_GET_COOLDOWN = 30.0
 
 
 def _unwrap(value):
@@ -96,6 +102,27 @@ def _listing_entries(listing) -> list[tuple[str, dict]]:
         elif isinstance(entry, dict):
             rows.append((str(entry.get("Path") or ""), {key: _unwrap(val) for key, val in entry.items()}))
     return rows
+
+
+def _session_transfer_paths(session_path: str, objects: dict) -> list[str]:
+    """Transfer objects owned by one OBEX session.
+
+    The MAP and PBAP sessions each publish transfers under their own
+    path. Only the MAP ones may be cancelled for a stuck text download.
+    Message objects live under the same prefix but carry no Transfer1
+    interface, so they are never picked up here.
+    """
+    prefix = (session_path or "").rstrip("/") + "/"
+    paths = []
+    for path, interfaces in (objects or {}).items():
+        if not str(path).startswith(prefix):
+            continue
+        if not isinstance(interfaces, dict):
+            continue
+        if "org.bluez.obex.Transfer1" not in interfaces:
+            continue
+        paths.append(str(path))
+    return paths
 
 
 def _map_time(value: str) -> str:
@@ -231,6 +258,9 @@ class BluetoothSession:
         self._map_path = ""
         self._pbap_path = ""
         self._message_paths: dict[str, str] = {}
+        # Handles whose download timed out, mapped to the monotonic time
+        # when they may be tried again.
+        self._stuck_gets: dict[str, float] = {}
         self._obex_proc: subprocess.Popen | None = None
         self._announce_live = False
         self._listening = False
@@ -646,11 +676,23 @@ class BluetoothSession:
             self._track(self._watch_contacts())
 
     async def _sync_inbox(self, announce: bool) -> None:
+        await self._poll_inbox_listing(announce)
+        # A new text can already be sitting on the bus as an alert, with
+        # no inbox row. Pick those up too.
+        await self._collect_live_messages(announce)
+
+    async def _poll_inbox_listing(self, announce: bool, update: bool = True) -> int:
+        """Download inbox rows the alert listener never announced.
+
+        Returns how many rows became newly complete. Finished rows are
+        skipped before reading so a poll never re-fetches old texts.
+        """
         access = await self._iface("org.bluez.obex", self._map_path, "org.bluez.obex.MessageAccess1", self._session_bus)
-        try:
-            await access.call_update_inbox()
-        except Exception:
-            pass
+        if update:
+            try:
+                await access.call_update_inbox()
+            except Exception:
+                pass
         try:
             listing = await access.call_list_messages(
                 "telecom/msg/inbox",
@@ -658,28 +700,53 @@ class BluetoothSession:
             )
         except Exception:
             listing = await access.call_list_messages("telecom/msg/inbox", {})
-        for path, fields in _listing_entries(listing):
+        entries = _listing_entries(listing)
+        # The folder argument is relative to the session's working
+        # directory, which this program never sets. When the subfolder
+        # path misses, the working directory itself may still list.
+        try:
+            current = await access.call_list_messages(
+                "", {"MaxCount": Variant("q", 40), "SubjectLength": Variant("y", 255)}
+            )
+            current_entries = _listing_entries(current)
+            seen = {_handle_from(path, fields) or path for path, fields in entries}
+            for item in current_entries:
+                key = _handle_from(item[0], item[1]) or item[0]
+                if key not in seen:
+                    seen.add(key)
+                    entries.append(item)
+        except Exception:
+            pass
+        saved = 0
+        for path, fields in entries:
             handle = _handle_from(path, fields)
             if path and handle:
                 self._message_paths[handle] = path
+            current = self.store.record(handle) if handle else None
+            if current and current["body_complete"]:
+                continue
             # The listing is a preview. The full text, and often the phone
             # number, are inside the downloaded message.
             self._ingest(fields, path=path, announce=announce)
             if handle:
                 await self._download_body(handle, announce=announce, sent=bool(fields.get("Sent")))
-        # A new text can already be sitting on the bus as an alert, with
-        # no inbox row. Pick those up too.
-        await self._collect_live_messages(announce)
+                after = self.store.record(handle)
+                if after and after["body_complete"] and (current is None or not current["body_complete"]):
+                    saved += 1
+        return saved
 
     async def _collect_live_messages(self, announce: bool) -> int:
-        """Download message alerts BlueZ already has, skipping finished ones."""
+        """Download message alerts BlueZ already has, skipping finished ones.
+
+        Message objects from an earlier session linger under its own path
+        and are still downloadable, so objects under any session count.
+        """
         if not self._session_bus or not self._map_path:
             return 0
         saved = 0
         objects = await self._managed("org.bluez.obex", "/", self._session_bus)
-        prefix = self._map_path + "/message"
         for path, interfaces in objects.items():
-            if not str(path).startswith(prefix):
+            if "/message" not in str(path):
                 continue
             props = _props_of(interfaces, "org.bluez.obex.Message1")
             if not props:
@@ -716,9 +783,8 @@ class BluetoothSession:
         # to invent a name from digits.
         label = sender_name if sender_name and sender_name != sender else ""
         subject = str(fields.get("Subject") or "")
-        attached = bool(fields.get("Attachment") or fields.get("AttachmentSize"))
+        attached = message_has_file(fields, subject)
         if present_message(subject, False) == "attachment omitted":
-            attached = True
             subject = ""
         external_id = handle or f"preview-{_map_time(str(fields.get('Timestamp') or ''))}-{sender}"
         row, created = self.store.upsert_message(
@@ -738,7 +804,57 @@ class BluetoothSession:
             self.emit({"event": "message", "message": row, "notify": True})
         return row, created
 
-    async def _wait_transfer(self, transfer_path: str) -> None:
+    async def _cancel_transfer(self, transfer_path: str) -> None:
+        """Stop one OBEX transfer, then wait until its object is gone.
+
+        A vanished object reads back as "complete". Either way the
+        session is idle again before the next download starts.
+        """
+        if not transfer_path or not self._session_bus:
+            return
+        try:
+            transfer = await self._iface(
+                "org.bluez.obex", transfer_path, "org.bluez.obex.Transfer1", self._session_bus
+            )
+            await transfer.call_cancel()
+        except Exception:
+            pass
+        await self._wait_transfer_rounds(transfer_path, 20)
+
+    async def _cancel_map_transfers(self) -> None:
+        """Stop every transfer on the message session, leaving contacts alone."""
+        if not self._session_bus or not self._map_path:
+            return
+        try:
+            objects = await self._managed("org.bluez.obex", "/", self._session_bus)
+        except Exception:
+            return
+        for path in _session_transfer_paths(self._map_path, objects):
+            await self._cancel_transfer(path)
+
+    async def _pull_message_file(self, message_path: str, target: Path) -> tuple[str, str]:
+        """Download one text file from the phone.
+
+        Returns the bytes read and the transfer status. A photo download
+        can run for minutes on the phone; this waits five seconds, then
+        cancels so the session is idle before the next text.
+        attachment=False: image bytes are never copied onto this computer.
+        """
+        message = await self._iface("org.bluez.obex", message_path, "org.bluez.obex.Message1", self._session_bus)
+        result = await message.call_get(str(target), False)
+        transfer = str(result[0]) if isinstance(result, (list, tuple)) and result else ""
+        if not transfer:
+            return await self._read_bmessage(target), "complete"
+        status = await self._wait_transfer(transfer)
+        if status != "timeout":
+            return await self._read_bmessage(target), status
+        # Read before cancelling: obexd may delete the partial file.
+        before = await self._read_bmessage(target)
+        await self._cancel_transfer(transfer)
+        after = await self._read_bmessage(target)
+        return (after if after else before), status
+
+    async def _wait_transfer(self, transfer_path: str) -> str:
         """Message.Get answers before the file has any bytes in it.
 
         The returned object is a transfer. It stays "queued" until the
@@ -780,19 +896,23 @@ class BluetoothSession:
 
     async def _download_body(self, handle: str, announce: bool = False, sent: bool | None = None) -> None:
         """Read one text from the phone and store the words plus the sender."""
+        current = self.store.record(handle)
+        if current and current["body_complete"]:
+            return
+        if self._stuck_gets.get(handle, 0.0) > time.monotonic():
+            return
         path = self._message_paths.get(handle)
         if not path:
             return
         target = runtime_dir() / f"incoming-{handle}.bmsg"
-        raw = ""
         try:
-            message = await self._iface("org.bluez.obex", path, "org.bluez.obex.Message1", self._session_bus)
-            # attachment=False: never copy image bytes onto this computer.
-            result = await message.call_get(str(target), False)
-            transfer = str(result[0]) if isinstance(result, (list, tuple)) and result else ""
-            if transfer:
-                await self._wait_transfer(transfer)
-            raw = await self._read_bmessage(target)
+            try:
+                raw, status = await self._pull_message_file(path, target)
+            except Exception:
+                # A stuck photo GET fails the next download too. Clear
+                # the session, then try this text once more.
+                await self._cancel_map_transfers()
+                raw, status = await self._pull_message_file(path, target)
         except Exception:
             return
         finally:
@@ -802,14 +922,24 @@ class BluetoothSession:
                 pass
         text = extract_bmessage_text(raw)
         current = self.store.record(handle)
+        flagged = bool(current["has_attachment"]) if current else False
+        decided = words_after_transfer(status, raw, text, flagged)
+        if decided is None:
+            if status == "timeout":
+                now = time.monotonic()
+                self._stuck_gets = {key: done for key, done in self._stuck_gets.items() if done > now}
+                self._stuck_gets[handle] = now + _STUCK_GET_COOLDOWN
+            return
+        text, flagged = decided
         if sent is None:
             sent = current["direction"] == "out" if current else False
         peer = extract_bmessage_peer(raw, sent)
         address = address_from_thread(current["thread_key"]) if current else peer
         if not address:
             address = peer
-        if not address or not text:
+        if not address or (not text and not flagged):
             return
+        was_complete = bool(current["body_complete"]) if current else False
         label = current["peer_label"] if current else ""
         _row, created = self.store.upsert_message(
             external_id=handle,
@@ -818,11 +948,13 @@ class BluetoothSession:
             direction="out" if sent else "in",
             timestamp=current["timestamp"] if current else Store.now_stamp(),
             read=bool(current["read"]) if current else False,
-            has_attachment=bool(current["has_attachment"]) if current else ("attachment omitted" in present_message(text, False)),
+            has_attachment=flagged,
             body_complete=True,
             peer_label=label,
         )
-        if _row and announce and created and not sent:
+        # A preview row already exists when the listing named a sender, so
+        # finishing the download must announce too, not just creating it.
+        if _row and announce and not sent and (created or not was_complete):
             self.emit({"event": "message", "message": _row, "notify": True})
 
     async def _watch_contacts(self) -> None:
@@ -982,8 +1114,15 @@ class BluetoothSession:
                 continue
             try:
                 async with self.lock:
+                    # Bus objects only. Querying the inbox listing from this
+                    # loop coincided with lost alerts, and the listing has
+                    # never returned a row on this phone, so it stays a
+                    # connect-time sync step, not a poll.
                     saved = await self._collect_live_messages(self._announce_live)
             except Exception:
+                # A dead session looks like a poll error. Recheck the link
+                # on the next tick instead of waiting out the full interval.
+                self._link_ticks = 8
                 continue
             if saved:
                 self._emit_threads()
@@ -1101,11 +1240,15 @@ class BluetoothSession:
         return found
 
     async def _map_alive(self) -> bool:
-        """True when the message session is still on the bus."""
+        """True when the message session answers on the bus.
+
+        Introspection alone is not enough: a dead session can leave a
+        zombie object behind that has no message interface.
+        """
         if not self._map_path or not self._session_bus:
             return False
         try:
-            await self._session_bus.introspect("org.bluez.obex", self._map_path)
+            await self._iface("org.bluez.obex", self._map_path, "org.bluez.obex.MessageAccess1", self._session_bus)
             return True
         except Exception:
             return False

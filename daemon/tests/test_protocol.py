@@ -104,6 +104,43 @@ class AttachmentTests(unittest.TestCase):
     def test_image_only_message_is_a_placeholder(self):
         self.assertEqual(protocol.present_message("", True), "attachment omitted")
 
+    def test_a_mime_type_marks_the_file(self):
+        self.assertTrue(protocol.message_has_file({"AttachmentMimeTypes": "image/jpeg"}))
+        self.assertFalse(protocol.message_has_file({"Type": "sms-gsm"}))
+
+    def test_a_photo_with_no_caption_is_still_a_message(self):
+        raw = "BEGIN:BMSG\r\nBEGIN:MSG\r\nEND:MSG\r\nEND:BMSG\r\n"
+        words, flagged = protocol.keep_words(raw, "", False)
+        self.assertEqual(words, "")
+        self.assertTrue(flagged)
+        self.assertEqual(protocol.present_message(words, flagged), "attachment omitted")
+
+
+class TransferWordsTests(unittest.TestCase):
+    def test_a_timed_out_plain_text_is_retried(self):
+        raw = "BEGIN:BMSG\r\nVERSION:1.0\r\nBEGIN:MSG\r\n"
+        self.assertIsNone(protocol.words_after_transfer("timeout", raw, "", False))
+        self.assertIsNone(protocol.words_after_transfer("error", raw, "", False))
+
+    def test_a_timed_out_photo_keeps_the_placeholder(self):
+        raw = "BEGIN:BMSG\r\nVERSION:1.0\r\nBEGIN:MSG\r\n"
+        self.assertEqual(protocol.words_after_transfer("timeout", raw, "", True), ("", True))
+
+    def test_a_partial_photo_is_flagged_from_its_bytes(self):
+        raw = "BEGIN:BMSG\r\nimage/jpeg\r\nBEGIN:MSG\r\n"
+        self.assertEqual(protocol.words_after_transfer("timeout", raw, "", False), ("", True))
+
+    def test_a_finished_photo_with_no_caption_keeps_the_placeholder(self):
+        raw = "BEGIN:BMSG\r\nBEGIN:MSG\r\nEND:MSG\r\nEND:BMSG\r\n"
+        self.assertEqual(protocol.words_after_transfer("complete", raw, "", False), ("", True))
+
+    def test_a_finished_text_is_kept_plain(self):
+        raw = protocol.build_bmessage("+15551234567", "hello")
+        self.assertEqual(protocol.words_after_transfer("complete", raw, "hello", False), ("hello", False))
+        self.assertEqual(
+            protocol.words_after_transfer("complete", raw, "see this", True), ("see this", True)
+        )
+
 
 class NameOnlyVCardTests(unittest.TestCase):
     def test_family_and_given_name_are_shown(self):
