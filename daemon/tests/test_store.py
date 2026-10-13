@@ -209,6 +209,59 @@ class StoreTests(unittest.TestCase):
         bodies = [row["body"] for row in self.db.messages_for(quinn["key"])]
         self.assertEqual(bodies, ["from the phone", "from email"])
 
+    def test_a_deleted_conversation_does_not_come_back(self):
+        self.db.upsert_message(
+            external_id="map-keep",
+            address="+15550001111",
+            body="keep me",
+            direction="in",
+            timestamp="2026-10-02T12:00:00",
+            read=True,
+            has_attachment=False,
+            body_complete=True,
+            peer_label="Keep",
+        )
+        self.db.upsert_message(
+            external_id="map-gone",
+            address="+15550002222",
+            body="gone",
+            direction="in",
+            timestamp="2026-10-02T12:05:00",
+            read=True,
+            has_attachment=False,
+            body_complete=True,
+            peer_label="+15550002222",
+        )
+        self.assertEqual(self.db.delete_thread("tel:+15550002222"), 1)
+        self.assertEqual([row["label"] for row in self.db.threads()], ["Keep"])
+        again, created = self.db.upsert_message(
+            external_id="map-gone",
+            address="+15550002222",
+            body="gone",
+            direction="in",
+            timestamp="2026-10-02T12:05:00",
+            read=True,
+            has_attachment=False,
+            body_complete=True,
+            peer_label="+15550002222",
+        )
+        self.assertIsNone(again)
+        self.assertFalse(created)
+        self.assertEqual([row["label"] for row in self.db.threads()], ["Keep"])
+        fresh, created = self.db.upsert_message(
+            external_id="map-new",
+            address="+15550002222",
+            body="a new text",
+            direction="in",
+            timestamp="2026-10-02T13:00:00",
+            read=False,
+            has_attachment=False,
+            body_complete=True,
+            peer_label="+15550002222",
+        )
+        self.assertTrue(created)
+        self.assertEqual(fresh["thread"], "tel:+15550002222")
+
     def test_a_later_address_replaces_a_name_only_thread(self):
         self.db.upsert_message(
             external_id="map-raw",

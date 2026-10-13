@@ -86,6 +86,10 @@ class Store:
               body_complete INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread_key, timestamp);
+
+            CREATE TABLE IF NOT EXISTS deleted_messages (
+              external_id TEXT PRIMARY KEY
+            );
             """
         )
         self._db.commit()
@@ -233,7 +237,16 @@ class Store:
         body_complete: bool,
         peer_label: str = "",
     ) -> tuple[dict, bool]:
-        """Insert or update one text. Returns the row and whether it was new."""
+        """Insert or update one text. Returns the row and whether it was new.
+
+        A text from a conversation you deleted stays deleted. A later new
+        text from that person still arrives.
+        """
+        if self._db.execute(
+            "SELECT 1 FROM deleted_messages WHERE external_id = ?",
+            (external_id,),
+        ).fetchone():
+            return None, False
         own = self.settings()["ownNumber"]
         direct = thread_key(address, own)
         label = peer_label or self.label_for(address) or ""
@@ -381,6 +394,26 @@ class Store:
         if changed:
             self._db.commit()
         return changed
+
+    def delete_thread(self, key: str) -> int:
+        """Remove one conversation. The same texts are not saved again."""
+        key = str(key or "")
+        if not key:
+            return 0
+        rows = self._db.execute(
+            "SELECT external_id FROM messages WHERE thread_key = ?",
+            (key,),
+        ).fetchall()
+        for row in rows:
+            external_id = row["external_id"]
+            if external_id:
+                self._db.execute(
+                    "INSERT OR IGNORE INTO deleted_messages (external_id) VALUES (?)",
+                    (external_id,),
+                )
+        deleted = self._db.execute("DELETE FROM messages WHERE thread_key = ?", (key,))
+        self._db.commit()
+        return int(deleted.rowcount)
 
     def threads(self) -> list[dict]:
         self.fold_same_person()

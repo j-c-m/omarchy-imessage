@@ -39,6 +39,7 @@ Item {
   property string toLabel: ""
   property bool sendPending: false
   property string lastOpened: ""
+  property bool openAfterDelete: false
   property bool caretOn: true
 
   Timer {
@@ -328,6 +329,22 @@ Item {
     root.lastOpened = row.key
     root.svc.loadMessages(row.key)
     root.svc.markRead(row.key)
+  }
+
+  function deleteSelected() {
+    if (root.screen !== "inbox" || !root.svc)
+      return
+    if (root.selected < 0 || root.selected >= shownModel.count)
+      return
+    var row = shownModel.get(root.selected)
+    if (!row || !row.key)
+      return
+    var key = row.key
+    root.lastOpened = ""
+    root.svc.clearMessages()
+    root.openAfterDelete = true
+    root.svc.deleteThread(key)
+    root.notice = "deleted"
   }
 
   function move(delta) {
@@ -694,7 +711,7 @@ Item {
 
   function hintLine() {
     if (root.helpOn)
-      return "esc close help    j/k move    enter select    n new text    r reply    / filter    t notification text    y/n pairing    p explicit pair"
+      return "esc close help    j/k move    enter select    n new text    r reply    / filter    ctrl+d delete    t notification text    y/n pairing    p explicit pair"
     if (root.screen === "code")
       return "y accept on this computer    n reject    esc cancel"
     if (root.screen === "checklist")
@@ -709,7 +726,7 @@ Item {
     }
     if (root.screen === "setup")
       return "j/k move    / filter    enter pair    p other pairing    esc close"
-    return "j/k move    enter open    r reply    n new    / filter    esc close    ? help"
+    return "j/k move    enter open    r reply    n new    / filter    ctrl+d delete    esc close    ? help"
   }
 
   ListModel { id: shownModel }
@@ -728,7 +745,15 @@ Item {
     ignoreUnknownSignals: true
     function onStateChanged() { if (root.opened) root.followState(false) }
     function onPairCodeChanged() { if (root.opened && root.svc && root.svc.pairCode) root.screen = "code" }
-    function onThreadRevisionChanged() { if (root.screen === "inbox") root.rebuildShown() }
+    function onThreadRevisionChanged() {
+      if (root.screen !== "inbox")
+        return
+      root.rebuildShown()
+      if (root.openAfterDelete) {
+        root.openAfterDelete = false
+        root.openSelectedThread()
+      }
+    }
     function onDeviceRevisionChanged() { if (root.screen === "setup") root.rebuildShown() }
     function onContactRevisionChanged() { if (root.screen === "contacts") root.selected = 0 }
     function onSentRevisionChanged() { if (root.opened) root.acceptSend() }
@@ -916,6 +941,8 @@ Item {
           } else if (!filtering && (event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_E && root.screen === "inbox") {
             root.startReply()
             root.openEmoji()
+          } else if (!filtering && (event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_D && root.screen === "inbox") {
+            root.deleteSelected()
           } else if (!filtering && event.key === Qt.Key_N && root.screen === "inbox") {
             root.screen = "contacts"
             root.filterOn = false
@@ -1361,6 +1388,14 @@ Item {
             }
             Text {
               text: "/ filter"
+              Layout.fillWidth: true
+              horizontalAlignment: Text.AlignHCenter
+              color: root.muted
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+            Text {
+              text: "ctrl+d delete"
               Layout.fillWidth: true
               horizontalAlignment: Text.AlignHCenter
               color: root.muted

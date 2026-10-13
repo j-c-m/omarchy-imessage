@@ -69,6 +69,7 @@ Item {
     root.send({ "cmd": "send", "thread": thread, "address": address, "body": body })
   }
   function markRead(thread) { root.send({ "cmd": "mark-read", "thread": thread }) }
+  function deleteThread(thread) { root.send({ "cmd": "delete-thread", "thread": thread }) }
 
   function applyStatus(status) {
     if (!status)

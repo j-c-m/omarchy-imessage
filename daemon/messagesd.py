@@ -143,6 +143,12 @@ async def dispatch(name: str, command: dict, store: Store, session) -> None:
         emit({"event": "contacts", "contacts": store.search_contacts(query)})
         return
 
+    if name == "delete-thread":
+        key = str(command.get("thread") or "")
+        store.delete_thread(key)
+        emit({"event": "threads", "threads": store.threads()})
+        return
+
     if name == "mark-read":
         key = str(command.get("thread") or "")
         if session:

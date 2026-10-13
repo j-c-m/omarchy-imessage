@@ -469,7 +469,7 @@ class BluetoothSession:
                 peer_label=label,
             )
             self._emit_threads()
-            return str(row["thread"])
+            return str(row["thread"]) if row else ""
 
     async def mark_read(self, thread: str) -> None:
         handles = self.store.mark_thread_read(thread)
@@ -729,6 +729,8 @@ class BluetoothSession:
             body_complete=False,
             peer_label=label,
         )
+        if row is None:
+            return None
         if announce and created and row["direction"] == "in" and not row["read"]:
             self.emit({"event": "message", "message": row, "notify": True})
         return row, created
@@ -817,7 +819,7 @@ class BluetoothSession:
             body_complete=True,
             peer_label=label,
         )
-        if announce and created and not sent:
+        if _row and announce and created and not sent:
             self.emit({"event": "message", "message": _row, "notify": True})
 
     async def _watch_contacts(self) -> None:
