@@ -37,7 +37,7 @@ iOS does not publish MAP until the radio link is up. Before `CreateSession`, the
 
 If MAP still fails because the service record is missing, the phone refused the channel, or it has not allowed access, the program brings the link up once more and tries `CreateSession` again.
 
-A saved phone is reopened the same way when the daemon starts, so the bar can receive texts while the card is closed. If the link drops later, the card stops saying connected and tries again about twice a minute.
+A saved phone is reopened the same way when the daemon starts, so the bar can receive texts while the terminal screen is closed. If the link drops later, the status line stops saying connected and the daemon tries again about twice a minute.
 
 The ANCS advertisement stops when messages connect. If they are still down after 120 seconds, the advertisement stops. A new pair cancels the previous timer.
 
@@ -45,7 +45,7 @@ The ANCS advertisement stops when messages connect. If they are still down after
 
 The picker still lists discovered phones.
 
-If a phone is already saved, it stays saved when it is absent or powered off. If nothing is saved, a phone is stored only when exactly one paired phone is in the list. Zero or several: the card waits for Enter.
+If a phone is already saved, it stays saved when it is absent or powered off. If nothing is saved, a phone is stored only when exactly one paired phone is in the list. Zero or several: the phone list waits for Enter.
 
 ## Threads and sends
 
@@ -53,7 +53,7 @@ A listing that has only a display name is not stored. The downloaded bMessage in
 
 Two texts in the same second use the later row as the conversation preview.
 
-The composer stays until the phone accepts the send. A failure leaves the text in place and shows the error on the caption line. A success opens that conversation. A messages payload is applied only when it matches the open thread.
+Enter sends and closes the composer. A failure shows the error on the status line. A success opens that conversation. A messages payload is applied only when it matches the open thread.
 
 ## Files
 
@@ -61,7 +61,7 @@ The composer stays until the phone accepts the send. A failure leaves the text i
 - `daemon/protocol.py` names the audio profiles and turns Bluetooth failures into short sentences.
 - `daemon/store.py` rethreads a message when a sendable address arrives, and picks the later preview.
 - `daemon/messagesd.py` reports the thread key of a sent text.
-- `Service.qml` and `Overlay.qml` keep a failed draft, show the error, and load only the open thread.
+- `Service.qml` keeps the daemon running and starts the terminal screen from the bar.
 - `README.md` describes the `p` key as another pair, not as a connect-all fallback.
 
 `python3 -m unittest discover -s daemon/tests -v` covers the profile ids, the error sentences, rethreading, and the preview. The BlueZ calls are not unit tested.

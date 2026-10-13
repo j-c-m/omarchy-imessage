@@ -1,23 +1,11 @@
 # iMsg
 
-Read and send texts from a nearby iPhone, in a small terminal-style card on the Omarchy bar. The phone stays in charge. This computer never asks for an Apple ID or an iCloud password. It uses two ordinary Bluetooth profiles:
+Read and send texts from a nearby iPhone, in a terminal screen opened from the Omarchy bar. The phone stays in charge. This computer never asks for an Apple ID or an iCloud password. It uses two ordinary Bluetooth profiles:
 
 - **MAP** carries the texts. Carrier SMS and iMessage both arrive as plain text. The phone chooses the route.
 - **PBAP** carries contact names, so you can pick a person instead of typing a number.
 
-The pictures below are illustrations. The people and the texts are made up.
-
-## What the card looks like
-
-Unread names are bold and sit at the top of the left list. That list is names only. The conversation is on the right: texts you receive stay on the left, texts you send sit on the right, and each one has the time under it.
-
-![iMsg card with three fake contacts. Ada is selected. Her texts sit on the left, the reply sits on the right, each with a time.](docs/msg-overlay.jpg)
-
-Click **iMsg** on the right side of the bar. Or bind a key in `~/.config/hypr/bindings.lua`. The plugin does not edit Hyprland for you.
-
-```lua
-o.bind("SUPER + SHIFT + M", "iMsg", "omarchy-shell shell toggle io.github.nikolaos-gkionis.messages '{}'")
-```
+Click **iMsg** on the right side of the bar. That opens the terminal screen. If it is already open, that window is focused.
 
 ## Install
 
@@ -34,13 +22,13 @@ While you are developing this checkout, link it and enable that id. `omarchy plu
 
 ## Terminal
 
-`tui` is the same daemon with a terminal screen instead of the Qt card. Restart the shell once so the daemon opens its socket, then:
+The terminal screen is a client of the plugin daemon. Restart the shell once so the daemon opens its socket, then:
 
 ```sh
 python3 -m tui
 ```
 
-Install `python-textual` first. `--standalone` starts a daemon when the plugin is not running. Do not use it while the plugin's daemon is already connected to the phone. A click on the bar button, or on a notification, opens this program. If it is already open, that window is focused. A notification for a conversation opens that conversation. The Qt card is still in the tree, but those clicks no longer show it. Restart the shell once after updating so the running shell and daemon use this path.
+Install `python-textual` first. `--standalone` starts a daemon when the plugin is not running. Do not use it while the plugin's daemon is already connected to the phone. A click on the bar button, or on a notification, opens this program. A notification for a conversation opens that conversation. Restart the shell once after updating so the running shell and daemon use this path.
 
 ```sh
 omarchy plugin validate .
@@ -53,33 +41,31 @@ omarchy restart shell
 
 ## Set up the iPhone
 
-1. Open the card. It looks for phones that are already paired. Highlight your iPhone and press Enter.
+1. Open the program. It lists phones that are already paired. Highlight your iPhone and press Enter.
 2. A code appears here and on the phone. Press `y` here and confirm the same code on the phone. Press `n` to reject it.
 3. If pairing stops on its own, press `p`. Enter connects and pairs. `p` pairs without that connect. On some adapters `p` only bonds Classic Bluetooth, which is still enough for texts. Either way this computer does not stay connected as a headset or a speaker.
 4. On the iPhone open **Settings → Bluetooth**, tap the **i** next to this computer, and turn on both switches in the picture. The phone may label the first one **Show Notifications** or **Show Message Notifications**. The second is **Sync Contacts**. They can take a minute to appear. If you see two entries with the same computer name, check both, then use this one.
 
 ![iPhone Bluetooth page for a computer named omarchy, with Show Notifications and Sync Contacts switched on.](docs/iphone-bluetooth-settings.jpg)
 
-5. Come back to the card. The status line should say `connected`. New texts show up from this moment on. Older conversations stay on the phone. The iPhone does not copy history over this link.
+5. Come back to the program. The status line should say `connected`. New texts show up from this moment on. Older conversations stay on the phone. The iPhone does not copy history over this link.
 6. Press `n` for the contact list. Names appear after Sync Contacts is on. A leading `0` on a mobile number is filled in with the country code from your own number, so a UK `07…` becomes `+44…`.
 
-If the status line says the phone is already in a message session, another computer is using the phone's only message connection. Disconnect that computer and open the card again.
+If the status line says the phone is already in a message session, another computer is using the phone's only message connection. Disconnect that computer and open the program again.
 
 ## Keys
 
 | Key | What it does |
 | --- | --- |
 | `j` / `k` or arrows | Move through the list |
-| Enter | Open the highlighted conversation, choose a contact, or send the reply |
+| Enter | Open the highlighted conversation, choose a contact, pair the highlighted phone, or send the reply. On an empty phone list, scan |
 | `r` | Reply in the open conversation |
-| `n` | New text. Type to filter names, Enter to choose |
-| Ctrl+E | Open the emoji list while writing. Type a word, `j` / `k`, Enter to insert |
+| `n` | New text. Type to filter names, Enter to choose. Rejects a pairing code when one is showing |
 | `/` | Start filtering the list you are in. Escape clears it |
 | `y` / `n` | Accept or reject the pairing code |
 | `p` | Explicit pairing, only on the phone list |
-| `t` | Include the message text in desktop notifications. Press again to turn it off. Not while writing a reply, filtering, or picking an emoji |
-| `?` | Show every hint |
-| Escape | Step back, then close the card |
+| `t` | Include the message text in desktop notifications. Press again to turn it off. Not while writing a reply or filtering |
+| Escape | Step back, then quit |
 
 The bar shows `iMsg`, and a count when something is unread. A desktop notification uses the contact's name. It does not include the message text unless you pressed `t`.
 
@@ -88,12 +74,12 @@ The bar shows `iMsg`, and a count when something is unread. A desktop notificati
 Bluetooth does not provide these, so the plugin does not pretend to:
 
 - Photos, video, reactions, typing indicators, or iMessage read receipts. A message with a file shows the words and one line, `attachment omitted`.
-- The full history already on the phone. Only texts that arrive after the card is connected, plus replies you send from here.
-- Texts you typed on the phone itself. The phone shares its inbox. Replies you send from this card are kept on this computer so your side of the conversation stays visible.
+- The full history already on the phone. Only texts that arrive after the program is connected, plus replies you send from here.
+- Texts you typed on the phone itself. The phone shares its inbox. Replies you send from this program are kept on this computer so your side of the conversation stays visible.
 - Group chats. One send goes to one person.
 - Texts while the phone is off, out of range, or linked to another computer's message session.
 
-SMS and iMessage look the same on this link. The card does not label a bubble blue or green.
+SMS and iMessage look the same on this link. A sent message is not labeled as one or the other.
 
 ## Where your data lives
 
@@ -120,7 +106,7 @@ Replace the address with the phone's Bluetooth address. You can see paired devic
 
 ```sh
 omarchy plugin validate .
-qmllint -I "$OMARCHY_PATH/shell" Service.qml Overlay.qml BarWidget.qml
+qmllint -I "$OMARCHY_PATH/shell" Service.qml BarWidget.qml
 python3 -m unittest discover -s daemon/tests -v
 ```
 

@@ -1113,7 +1113,7 @@ class BluetoothSession:
     async def _check_link(self) -> None:
         """Drop a stale "connected" state and try the phone again.
 
-        The message session can die overnight while the card still says
+        The message session can die overnight while the status line still says
         connected. A dead session is cleared at once. A new attempt waits
         half a minute so an absent phone is not dialed continuously.
         """

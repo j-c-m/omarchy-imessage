@@ -182,7 +182,7 @@ async def dispatch(name: str, command: dict, store: Store, session) -> None:
         return
 
     if name == "reconnect":
-        # Opening the card retries message access. The iPhone switch
+        # A reconnect retries message access. The iPhone switch
         # can be flipped while this program is already running.
         await session.reconnect()
         return
