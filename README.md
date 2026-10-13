@@ -64,7 +64,7 @@ If the status line says the phone is already in a message session, another compu
 | `r` | Reply in the open conversation |
 | `n` | New text. Type to filter names, Enter to choose |
 | Ctrl+E | Open the emoji list while writing. Type a word, `j` / `k`, Enter to insert |
-| `/` | Filter the list you are in |
+| `/` | Start filtering the list you are in. Escape clears it |
 | `y` / `n` | Accept or reject the pairing code |
 | `p` | Explicit pairing, only on the phone list |
 | `t` | On the permission screen, include the message text in desktop notifications. This stays off until you turn it on |

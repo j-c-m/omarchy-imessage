@@ -23,6 +23,7 @@ Item {
   property string screen: "setup"
   property int selected: 0
   property string filterText: ""
+  property bool filterOn: false
   property string draft: ""
   property bool composeFocus: false
 
@@ -77,6 +78,7 @@ Item {
     root.toAddress = ""
     root.toLabel = ""
     root.filterText = ""
+    root.filterOn = false
     root.selected = 0
     root.followState(true)
     // A saved phone retries the message link. A missing phone starts a scan.
@@ -128,7 +130,8 @@ Item {
       root.cancelCompose()
       return
     }
-    if (root.filterText) {
+    if (root.filterOn) {
+      root.filterOn = false
       root.filterText = ""
       return
     }
@@ -367,6 +370,7 @@ Item {
     root.toLabel = row.name || row.address || "Contact"
     root.screen = "inbox"
     root.filterText = ""
+    root.filterOn = false
     root.rebuildShown()
     var chosen = root.selected >= 0 && root.selected < shownModel.count ? shownModel.get(root.selected) : null
     if (chosen && chosen.key) {
@@ -632,7 +636,7 @@ Item {
     if (root.screen === "checklist")
       return "t include message text in notifications (" + ((root.svc && root.svc.notifyBody) ? "on" : "off") + ")    esc back    ? help"
     if (root.screen === "contacts")
-      return "type to filter    j/k move    enter choose    esc back    Sync Contacts on the iPhone fills this list    ? help"
+      return "/ filter    j/k move    enter choose    esc back    ? help"
     if (root.screen === "emoji")
       return "type to search    j/k move    enter insert    esc back    ? help"
     if (root.composeFocus) {
@@ -640,7 +644,7 @@ Item {
       return "enter send" + (who ? " to " + who : "") + "    ctrl+e emoji    esc back"
     }
     if (root.screen === "setup")
-      return "j/k move    enter pair    enter scans again    p other pairing    esc close"
+      return "j/k move    / filter    enter pair    p other pairing    esc close"
     return "j/k move    enter open    r reply    n new    / filter    esc close    ? help"
   }
 
@@ -816,17 +820,22 @@ Item {
 
           if (root.screen === "contacts") {
             if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) root.pickContact()
-            else if (event.key === Qt.Key_Backspace) root.backspace("filter")
-            else if (event.key === Qt.Key_Down || (event.key === Qt.Key_J && !root.filterText)) root.move(1)
-            else if (event.key === Qt.Key_Up || (event.key === Qt.Key_K && !root.filterText)) root.move(-1)
-            else if (printable && event.text !== "/") root.typeInto("filter", event.text)
+            else if (event.key === Qt.Key_Backspace) {
+              if (root.filterOn && root.filterText.length === 0) root.filterOn = false
+              else if (root.filterOn) root.backspace("filter")
+            } else if (!root.filterOn && (event.key === Qt.Key_Down || event.key === Qt.Key_J)) root.move(1)
+            else if (!root.filterOn && (event.key === Qt.Key_Up || event.key === Qt.Key_K)) root.move(-1)
+            else if (!root.filterOn && event.key === Qt.Key_Slash) {
+              root.filterOn = true
+              root.filterText = ""
+            } else if (root.filterOn && printable) root.typeInto("filter", event.text)
             event.accepted = true
             return
           }
 
-          // j and k move only when you are not in the middle of a filter.
-          // Otherwise the letters j and k could never appear in a search.
-          var filtering = root.filterText.length > 0
+          // A letter moves or runs a command until / starts a filter.
+          // Inside the filter, j and k are letters in the search.
+          var filtering = root.filterOn
           if (event.key === Qt.Key_Down || (event.key === Qt.Key_J && !filtering)) root.move(1)
           else if (event.key === Qt.Key_Up || (event.key === Qt.Key_K && !filtering)) root.move(-1)
           else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
@@ -843,14 +852,19 @@ Item {
             root.openEmoji()
           } else if (!filtering && event.key === Qt.Key_N && root.screen === "inbox") {
             root.screen = "contacts"
+            root.filterOn = false
             root.filterText = ""
             root.selected = 0
             root.composeFocus = false
             if (root.svc) root.svc.searchContacts("")
           } else if (!filtering && event.key === Qt.Key_P && root.screen === "setup") root.pairSelected(true)
-          else if (event.key === Qt.Key_Slash) root.filterText = ""
-          else if (event.key === Qt.Key_Backspace) root.backspace("filter")
-          else if (printable) root.typeInto("filter", event.text)
+          else if (!filtering && event.key === Qt.Key_Slash) {
+            root.filterOn = true
+            root.filterText = ""
+          } else if (filtering && event.key === Qt.Key_Backspace) {
+            if (root.filterText.length === 0) root.filterOn = false
+            else root.backspace("filter")
+          } else if (filtering && printable) root.typeInto("filter", event.text)
           event.accepted = true
         }
 
@@ -883,6 +897,8 @@ Item {
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             text: {
+              if (root.filterOn && root.screen !== "code" && root.screen !== "emoji" && root.screen !== "checklist")
+                return "/" + root.filterText
               if (root.screen === "code")
                 return "Pairing code  " + (root.svc ? root.svc.pairCode : "")
               if (root.screen === "checklist")
@@ -1163,6 +1179,14 @@ Item {
             }
             Text {
               text: "n new"
+              Layout.fillWidth: true
+              horizontalAlignment: Text.AlignHCenter
+              color: root.muted
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+            Text {
+              text: "/ filter"
               Layout.fillWidth: true
               horizontalAlignment: Text.AlignHCenter
               color: root.muted
