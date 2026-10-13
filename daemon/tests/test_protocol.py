@@ -105,7 +105,7 @@ class AttachmentTests(unittest.TestCase):
         self.assertEqual(protocol.present_message("", True), "attachment omitted")
 
 
-class VCardTests(unittest.TestCase):
+class PlainVCardTests(unittest.TestCase):
     def test_reads_name_phone_and_email(self):
         raw = (
             "BEGIN:VCARD\n"
@@ -120,6 +120,25 @@ class VCardTests(unittest.TestCase):
         self.assertEqual(people[0]["name"], "Ada Lovelace")
         self.assertEqual(people[0]["phones"], ["+15551234567"])
         self.assertEqual(people[0]["emails"], ["ada@example.com"])
+
+
+class PublicErrorTests(unittest.TestCase):
+    def test_a_missing_file_is_not_a_missing_bluetooth_service(self):
+        text = protocol.public_error(FileNotFoundError("No such file or directory: '/tmp/incoming.bmsg'"))
+        self.assertNotIn("bluez-obex", text)
+
+    def test_a_missing_dbus_service_asks_for_obex(self):
+        exc = RuntimeError("org.freedesktop.DBus.Error.ServiceUnknown: The name org.bluez.obex was not provided")
+        text = protocol.public_error(exc)
+        self.assertIn("bluez-obex", text)
+
+    def test_authentication_failure_is_not_a_cancel(self):
+        text = protocol.public_error(RuntimeError("org.bluez.Error.AuthenticationFailed"))
+        self.assertEqual(text, "Pairing failed.")
+
+    def test_authentication_cancel_says_cancelled(self):
+        text = protocol.public_error(RuntimeError("org.bluez.Error.AuthenticationCanceled"))
+        self.assertEqual(text, "Pairing was cancelled.")
 
 
 class NotificationTests(unittest.TestCase):

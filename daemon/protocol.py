@@ -346,10 +346,12 @@ def public_error(exc: BaseException) -> str:
         return "The iPhone has not allowed message access yet. Turn on Show Message Notifications."
     if "connection refused" in lowered or "errno 111" in lowered or "host is down" in lowered:
         return "The phone is already in a message session with another computer, or it is out of range."
-    if "dbus" in lowered and "not found" in lowered or "no such file" in lowered or "serviceunknown" in lowered.replace(" ", ""):
+    if ("dbus" in lowered and "not found" in lowered) or "serviceunknown" in lowered.replace(" ", ""):
         return "Bluetooth messaging is not running. Install bluez-obex and make sure Bluetooth is on."
-    if "org.bluez.error.authentication" in lowered or "authentication" in lowered and "cancel" in lowered:
+    if "authentication" in lowered and "cancel" in lowered:
         return "Pairing was cancelled."
+    if "authentication" in lowered:
+        return "Pairing failed."
     # Keep a short class name when the text might contain a device path.
     name = type(exc).__name__
     if len(text) > 160 or "BEGIN:MSG" in text or "BEGIN:VCARD" in text:
