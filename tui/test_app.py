@@ -12,7 +12,29 @@ try:
 except ImportError:  # pragma: no cover
     raise unittest.SkipTest("textual is not installed")
 
-from tui.app import ImsgApp, render_message
+from tui.app import Composer, ImsgApp, render_message
+
+
+def _background_columns(text, prefix: str) -> list[list[int]]:
+    """Columns of each line whose style starts with prefix. Drops the trailing blank line."""
+    rows: list[list[int]] = []
+    start = 0
+    plain = text.plain
+    while start < len(plain):
+        end = plain.find("\n", start)
+        if end == -1:
+            end = len(plain)
+        columns = []
+        for index in range(start, end):
+            if any(str(span.style).startswith(prefix) and span.start <= index < span.end for span in text.spans):
+                columns.append(index - start)
+        rows.append(columns)
+        if end == len(plain):
+            break
+        start = end + 1
+    if rows and not rows[-1] and plain.endswith("\n"):
+        rows.pop()
+    return rows
 from tui.render import link_spans
 
 
@@ -35,6 +57,13 @@ class QueueClient:
         await self.queue.put(event)
 
 
+class ThemeTests(unittest.TestCase):
+    def test_the_screen_uses_terminal_ansi_colors(self):
+        app = ImsgApp(client=QueueClient())
+        self.assertTrue(app.ansi_color)
+        self.assertEqual(app.theme, "ansi-dark")
+
+
 class LinkTests(unittest.TestCase):
     def test_a_bare_host_is_a_link(self):
         spans = link_spans("Stop him: voterep.co/j237n today")
@@ -44,6 +73,32 @@ class LinkTests(unittest.TestCase):
         text = render_message({"body": "see https://example.com/a now", "direction": "in", "timestamp": "2026-10-02T12:00:00"})
         styles = [str(span.style) for span in text.spans]
         self.assertTrue(any("https://example.com/a" in style for style in styles))
+
+    def test_a_sent_message_is_on_the_right_without_you(self):
+        text = render_message(
+            {"body": "hi", "direction": "out", "timestamp": "2026-10-02T12:04:00"},
+            width=10,
+        )
+        self.assertNotIn("you", text.plain)
+        lines = text.plain.splitlines()
+        self.assertTrue(any(line.endswith("12:04") for line in lines))
+        self.assertTrue(all(len(line) <= 10 for line in lines))
+        self.assertTrue(any("hi" in line and line.startswith(" ") for line in lines))
+        sent = [str(span.style) for span in text.spans]
+        self.assertTrue(sent)
+        self.assertTrue(all("on blue" in style and "bright_black" not in style for style in sent))
+        self.assertEqual(_background_columns(text, "black on blue"), [list(range(5, 10)), list(range(5, 10))])
+
+    def test_a_received_message_is_black_on_bright_black(self):
+        text = render_message({"body": "hello", "direction": "in", "timestamp": "2026-10-02T12:00:00"})
+        styles = [str(span.style) for span in text.spans]
+        self.assertTrue(styles)
+        self.assertTrue(all(style.startswith("black on bright_black") for style in styles))
+        wide = render_message(
+            {"body": "hi", "direction": "in", "timestamp": "2026-10-02T12:00:00"},
+            width=20,
+        )
+        self.assertEqual(_background_columns(wide, "black on bright_black"), [list(range(5)), list(range(5))])
 
 
 class OpenTests(unittest.IsolatedAsyncioTestCase):
@@ -74,6 +129,92 @@ class OpenTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("mark-read", commands)
         marked = [item for item in client.sent if item["cmd"] == "mark-read"]
         self.assertEqual(marked[-1]["thread"], "tel:+15550002222")
+
+    async def test_t_toggles_notification_text(self):
+        client = QueueClient()
+        app = ImsgApp(client=client)
+        async with app.run_test(size=(100, 24)) as pilot:
+            await client.push({"event": "status", "status": {"state": "connected", "phoneName": "JM iPhone", "notifyBody": False}})
+            await client.push({
+                "event": "threads",
+                "threads": [{"key": "tel:+15550001111", "label": "Ada", "unread": 0, "preview": "hi"}],
+            })
+            await pilot.pause()
+            await pilot.press("t")
+            await pilot.pause()
+            self.assertTrue(app.notify_body)
+        toggles = [item for item in client.sent if item["cmd"] == "set-notify-body"]
+        self.assertEqual(toggles, [{"cmd": "set-notify-body", "enabled": True}])
+
+    async def test_contacts_list_is_twenty_characters_wide(self):
+        client = QueueClient()
+        app = ImsgApp(client=client)
+        async with app.run_test(size=(100, 24)) as pilot:
+            await client.push({"event": "threads", "threads": [{"key": "tel:+15550001111", "label": "Ada", "unread": 0}]})
+            await pilot.pause()
+            status = app.query_one("#status")
+            hint = app.query_one("#hint")
+            self.assertEqual(status.styles.padding.left, 1)
+            self.assertEqual(hint.styles.padding.right, 1)
+            self.assertEqual(status.styles.background.ansi, 8)
+            self.assertEqual(status.styles.color.ansi, 15)
+            self.assertEqual(hint.styles.background.ansi, 8)
+            self.assertEqual(hint.styles.color.ansi, 15)
+            top_gap, bottom_gap = app.query(".bar-gap")
+            self.assertEqual(top_gap.region.height, 1)
+            self.assertEqual(bottom_gap.region.height, 1)
+            self.assertEqual(top_gap.styles.background.ansi, 0)
+            self.assertEqual(bottom_gap.styles.background.ansi, 0)
+            self.assertEqual(top_gap.region.y, status.region.bottom)
+            body = app.query_one("#body")
+            self.assertEqual(body.region.y, top_gap.region.bottom)
+            self.assertEqual(bottom_gap.region.y, body.region.bottom)
+            self.assertEqual(hint.region.y, bottom_gap.region.bottom)
+            threads = app.query_one("#threads")
+            self.assertEqual(threads.region.width, 23)
+            self.assertEqual(threads.styles.background.ansi, 0)
+            self.assertEqual(threads.styles.border.right[0], "solid")
+            self.assertEqual(threads.styles.border.right[1].ansi, 8)
+            self.assertFalse(threads.styles.border.left[0])
+            self.assertNotEqual(app.query_one("#transcript").styles.background.ansi, 8)
+            await pilot.press("n")
+            await client.push({
+                "event": "contacts",
+                "contacts": [{"name": "A very long contact name indeed", "address": "+15550001111", "kind": "tel"}],
+            })
+            await pilot.pause()
+            panel = app.query_one("#threads")
+            self.assertEqual(panel.region.width, 23)
+            self.assertEqual(panel.content_region.width, 20)
+            self.assertEqual(panel.get_option_at_index(0).prompt, "A very long contact ")
+
+    async def test_reply_starts_at_one_line_and_grows_to_five(self):
+        client = QueueClient()
+        app = ImsgApp(client=client)
+        async with app.run_test(size=(100, 24)) as pilot:
+            await client.push({
+                "event": "threads",
+                "threads": [{"key": "tel:+15550001111", "label": "Ada", "unread": 0, "preview": "hi"}],
+            })
+            await pilot.pause()
+            await pilot.press("r")
+            await pilot.pause()
+            composer = app.query_one("#composer", Composer)
+            self.assertEqual(composer.region.height, 1)
+            self.assertEqual(composer.content_region.height, 1)
+            width = composer.wrap_width
+            self.assertGreater(width, 5)
+            composer.insert("x" * (width + 1))
+            await pilot.pause()
+            self.assertGreater(composer.region.height, 1)
+            self.assertLessEqual(composer.region.height, Composer.MAX_LINES)
+            composer.insert("x" * (width * 8))
+            await pilot.pause()
+            self.assertEqual(composer.region.height, Composer.MAX_LINES)
+            self.assertGreater(composer.wrapped_document.height, Composer.MAX_LINES)
+            composer.clear()
+            await pilot.pause()
+            self.assertEqual(composer.region.height, 1)
 
 
 if __name__ == "__main__":

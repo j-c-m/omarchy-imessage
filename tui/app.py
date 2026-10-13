@@ -20,7 +20,7 @@ from textual.widgets.option_list import Option
 from tui.client import connect
 from tui.render import link_spans
 
-HINT = "j/k move    enter open    r reply    n new    ctrl+d delete    / filter    esc back"
+HINT = "j/k move    enter open    r reply    n new    ctrl+d delete    / filter    t notification text    esc back"
 
 
 class ThreadList(OptionList):
@@ -30,10 +30,17 @@ class ThreadList(OptionList):
         Binding("down", "cursor_down", "down"),
         Binding("up", "cursor_up", "up"),
         Binding("enter", "select", "open"),
+        Binding("t", "notify", "notification text"),
     ]
+
+    def action_notify(self) -> None:
+        self.app.action_notify()
 
 
 class Composer(TextArea):
+    """Reply field. One line tall, then grows with wrapped text up to five."""
+
+    MAX_LINES = 5
     BINDINGS = [
         Binding("enter", "submit", "send", priority=True),
         Binding("escape", "cancel", "cancel", priority=True),
@@ -45,21 +52,94 @@ class Composer(TextArea):
     def action_cancel(self) -> None:
         self.app.action_close_compose()
 
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        self._fit_lines()
+
+    def _on_resize(self) -> None:
+        super()._on_resize()
+        self._fit_lines()
+
+    def _fit_lines(self) -> None:
+        lines = min(self.MAX_LINES, max(1, self.wrapped_document.height))
+        if self.styles.height is not None and self.styles.height.cells == lines:
+            return
+        self.styles.height = lines
+
 
 class ImsgApp(App):
     TITLE = "iMsg"
+    DEFAULT_CSS = """
+    #status, #hint {
+        height: 1;
+        padding: 0 1;
+        background: ansi_bright_black;
+        color: ansi_bright_white;
+    }
+    .bar-gap {
+        height: 1;
+        background: ansi_black;
+    }
+    #body {
+        height: 1fr;
+    }
+    #threads {
+        width: 23;
+        min-width: 23;
+        max-width: 23;
+        height: 1fr;
+        padding: 0 1;
+        border: none;
+        border-right: solid ansi_bright_black;
+        background: ansi_black;
+        color: ansi_white;
+        background-tint: transparent;
+        &:focus {
+            background: ansi_black;
+            background-tint: transparent;
+            border: none;
+            border-right: solid ansi_bright_black;
+        }
+        & > .option-list--option, & > .option-list--option-hover {
+            background: ansi_black;
+            color: ansi_white;
+        }
+        & > .option-list--option-highlighted {
+            background: ansi_blue;
+            color: ansi_bright_white;
+        }
+        &:focus > .option-list--option-highlighted {
+            background: ansi_blue;
+            color: ansi_bright_white;
+        }
+    }
+    #stack {
+        width: 1fr;
+        height: 1fr;
+    }
+    #composer {
+        height: 1;
+        max-height: 5;
+        border: none;
+        padding: 0 1;
+        scrollbar-size-vertical: 1;
+        &:focus {
+            border: none;
+        }
+    }
+    """
     BINDINGS = [
         Binding("r", "reply", "reply"),
         Binding("n", "new_text", "new"),
         Binding("ctrl+d", "delete_thread", "delete"),
         Binding("slash", "filter", "filter"),
         Binding("escape", "back", "back", priority=True),
-        Binding("t", "notify", "notification text"),
         Binding("y", "accept_pair", "yes"),
     ]
 
     def __init__(self, client=None, standalone: bool = False) -> None:
-        super().__init__()
+        super().__init__(ansi_color=True)
+        # ansi-dark uses the terminal's 16 colors, not a fixed hex palette.
+        self.theme = "ansi-dark"
         self.client = client
         self.standalone = standalone
         self.threads: list[dict] = []
@@ -76,12 +156,14 @@ class ImsgApp(App):
 
     def compose(self) -> ComposeResult:
         yield Static("", id="status")
+        yield Static("", classes="bar-gap")
         yield Input(placeholder="filter", id="filter")
         with Horizontal(id="body"):
             yield ThreadList(id="threads")
             with Vertical(id="stack"):
                 yield RichLog(id="transcript", wrap=True, markup=False, min_width=8, auto_scroll=True)
-                yield Composer("", id="composer", show_line_numbers=False)
+                yield Composer("", id="composer", show_line_numbers=False, compact=True)
+        yield Static("", classes="bar-gap")
         yield Static(HINT, id="hint")
 
     def on_mount(self) -> None:
@@ -133,8 +215,11 @@ class ImsgApp(App):
         elif kind == "status":
             status = event.get("status") or {}
             self.notify_body = bool(status.get("notifyBody"))
-            detail = str(status.get("detail") or status.get("state") or "")
-            self._set_status(detail)
+            if status.get("state") == "connected":
+                name = str(status.get("phoneName") or "").strip()
+                self._set_status("Connected: " + name if name else "Connected")
+            else:
+                self._set_status(str(status.get("detail") or ""))
         elif kind == "pair-code":
             self.pair_code = str(event.get("code") or "")
             self._set_status("Pairing code " + self.pair_code)
@@ -155,11 +240,11 @@ class ImsgApp(App):
 
     def _show_contacts(self) -> None:
         self.shown = [row for row in self.contacts if self._matches(str(row.get("name") or ""))]
-        self._fill(lambda row: str(row.get("name") or row.get("address") or ""))
+        self._fill(lambda row: _clip(str(row.get("name") or row.get("address") or ""), 20))
 
     def _thread_prompt(self, row: dict) -> str:
         mark = "• " if row.get("unread") else ""
-        return mark + str(row.get("label") or "")
+        return _clip(mark + str(row.get("label") or ""), 20)
 
     def _fill(self, prompt) -> None:
         widget = self.query_one("#threads", ThreadList)
@@ -211,9 +296,13 @@ class ImsgApp(App):
 
     def _show_messages(self, messages: list[dict]) -> None:
         log = self.query_one("#transcript", RichLog)
+        # One column short of the log. A line that fills the log is wrapped
+        # again, which was splitting the minutes and the sent text.
+        width = log.scrollable_content_region.width or log.content_region.width or log.size.width
+        fit = max(1, width - 1)
         log.clear()
         for message in messages:
-            log.write(render_message(message))
+            log.write(render_message(message, fit), width=width)
         log.scroll_end(animate=False)
 
     def action_reply(self) -> None:
@@ -330,7 +419,12 @@ class ImsgApp(App):
     def action_notify(self) -> None:
         if self._typing():
             return
-        self.client.send({"cmd": "set-notify-body", "enabled": not self.notify_body})
+        self.notify_body = not self.notify_body
+        self.client.send({"cmd": "set-notify-body", "enabled": self.notify_body})
+        self._hint("notification text on" if self.notify_body else "notification text off")
+
+    def _hint(self, text: str = HINT) -> None:
+        self.query_one("#hint", Static).update(text)
 
     def action_accept_pair(self) -> None:
         if self._typing() or not self.pair_code:
@@ -349,21 +443,54 @@ class ImsgApp(App):
         return isinstance(focused, (Composer, Input))
 
 
-def render_message(message: dict) -> Text:
+def _clip(text: str, limit: int) -> str:
+    text = text.replace("\n", " ")
+    if len(text) <= limit:
+        return text
+    return text[:limit]
+
+
+def render_message(message: dict, width: int = 0) -> Text:
     raw = str(message.get("body") or "")
+    # Received text is black on bright black. Sent text is black on blue.
+    outbound = message.get("direction") == "out"
+    style = "black on blue" if outbound else "black on bright_black"
     body = Text()
     cursor = 0
     for start, end, href in link_spans(raw):
-        body.append(raw[cursor:start])
-        body.append(raw[start:end], style=f"underline link {href}")
+        body.append(raw[cursor:start], style=style)
+        body.append(raw[start:end], style=f"{style} underline link {href}")
         cursor = end
-    body.append(raw[cursor:])
+    body.append(raw[cursor:], style=style)
     stamp = str(message.get("timestamp") or "")[11:16]
-    who = "you  " if message.get("direction") == "out" else ""
-    head = Text(f"{who}{stamp}\n", style="dim")
-    head.append(body)
-    head.append("\n")
-    return head
+    block = Text()
+    if stamp:
+        block.append(stamp + "\n", style=style)
+    block.append(body)
+    # Pad every line to the widest line so the background is one rectangle.
+    # Sent rectangles sit on the right. A short column cannot hold the time.
+    from rich.cells import cell_len
+    from rich.console import Console
+    wrap_at = width if width >= 5 else 10000
+    lines = block.wrap(Console(width=wrap_at), wrap_at, overflow="fold")
+    box = 0
+    for line in lines:
+        box = max(box, cell_len(line.plain))
+    if width >= 5:
+        box = min(box, width)
+    shift = width - box if outbound and width >= 5 else 0
+    aligned = Text()
+    for index, line in enumerate(lines):
+        if index:
+            aligned.append("\n")
+        if shift:
+            aligned.append(" " * shift)
+        aligned.append(line)
+        extra = box - cell_len(line.plain)
+        if extra > 0:
+            aligned.append(" " * extra, style=style)
+    aligned.append("\n")
+    return aligned
 
 
 def main(argv: list[str] | None = None) -> None:
