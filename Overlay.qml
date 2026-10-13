@@ -7,8 +7,8 @@ import qs.Commons
 import qs.Ui
 
 // Centered terminal-style card. The dim layer behind it is the overlay;
-// the card itself stays in the middle of the screen. Every message is
-// plain text. Images are never drawn.
+// the card itself stays in the middle of the screen. Message text is
+// escaped. A web address is the only thing that becomes a link.
 Item {
   id: root
 
@@ -491,11 +491,55 @@ Item {
     root.svc.sendText(thread, root.toAddress, body)
   }
 
+  function escapeHtml(value) {
+    return String(value || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+  }
+
+  function trimUrl(url) {
+    var cut = String(url || "")
+    while (cut.length && /[.,;:!?)]$/.test(cut)) {
+      if (cut.charAt(cut.length - 1) === ")") {
+        var open = (cut.match(/\(/g) || []).length
+        var close = (cut.match(/\)/g) || []).length
+        if (close <= open)
+          break
+      }
+      cut = cut.slice(0, -1)
+    }
+    return cut
+  }
+
+  function linkify(value) {
+    // Only http and https. The address is escaped, so the message cannot
+    // add its own markup or start an image download.
+    var text = String(value || "")
+    var pattern = /(?:https?:\/\/|www\.)[^\s<>"']+/gi
+    var out = ""
+    var last = 0
+    var match
+    while ((match = pattern.exec(text)) !== null) {
+      out += root.escapeHtml(text.slice(last, match.index))
+      var shown = root.trimUrl(match[0])
+      var href = /^www\./i.test(shown) ? "https://" + shown : shown
+      out += "<a href=\"" + root.escapeHtml(href) + "\">" + root.escapeHtml(shown) + "</a>"
+      out += root.escapeHtml(match[0].slice(shown.length))
+      last = match.index + match[0].length
+    }
+    out += root.escapeHtml(text.slice(last))
+    return out
+  }
+
+  function openLink(url) {
+    var target = String(url || "")
+    if (!/^https?:\/\//i.test(target))
+      return
+    Qt.openUrlExternally(target)
+  }
+
   function withEmojiFont(value) {
     // The card font has no emoji pictures. Qt on this desktop has no
     // "families" fallback, so emoji are wrapped in the emoji font.
-    // The message is escaped first, so it cannot be read as markup.
-    var raw = String(value || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    var raw = root.linkify(value)
     var out = ""
     var run = ""
     for (var i = 0; i < raw.length; i++) {
@@ -963,8 +1007,21 @@ Item {
                       textFormat: Text.RichText
                       text: root.withEmojiFont(body)
                       color: direction === "out" ? root.selectedText : root.foreground
+                      linkColor: color
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.body
+                      onLinkActivated: function(link) { root.openLink(link) }
+
+                      MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: bodyText.hoveredLink ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        onClicked: function(mouse) {
+                          var link = bodyText.linkAt(mouse.x, mouse.y)
+                          if (link)
+                            root.openLink(link)
+                        }
+                      }
                     }
                   }
 
