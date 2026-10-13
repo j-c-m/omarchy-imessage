@@ -64,7 +64,6 @@ def status_from_store(store: Store, ready: bool, detail: str) -> dict:
         "unread": store.unread_count(),
         "notifyBody": settings["notifyBody"],
         "detail": detail,
-        "pairFallback": False,
         "bluetoothReady": ready,
     }
 

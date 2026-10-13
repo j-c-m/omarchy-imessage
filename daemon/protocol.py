@@ -21,6 +21,42 @@ _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _FENCE = re.compile(r"(?i)^(begin|end):(bmsg|bbody|benv|msg|vcard)\s*$")
 _BASE64_ALPHABET = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=")
 
+# Headset, hands-free, and media profiles. MAP and PBAP are not in this set.
+_AUDIO_PROFILE_IDS = (
+    "1108",  # HSP
+    "1112",  # HSP audio gateway
+    "111e",  # HFP
+    "111f",  # HFP audio gateway
+    "110a",  # A2DP source
+    "110b",  # A2DP sink
+    "110c",  # AVRCP target
+    "110e",  # AVRCP
+    "110f",  # AVRCP controller
+)
+
+# Message Access Server. The phone hosts it. This program connects to it.
+MAP_PROFILE_UUID = "00001132-0000-1000-8000-00805f9b34fb"
+
+
+def _profile_id(uuid: str) -> str:
+    """16-bit Bluetooth profile id from a short or 128-bit UUID."""
+    hexes = re.sub(r"[^0-9a-f]", "", (uuid or "").lower())
+    if len(hexes) >= 8 and hexes.startswith("0000"):
+        return hexes[4:8]
+    if len(hexes) == 4:
+        return hexes
+    return ""
+
+
+def is_audio_profile(uuid: str) -> bool:
+    """True when the UUID is a headset, hands-free, or media profile."""
+    return _profile_id(uuid) in _AUDIO_PROFILE_IDS
+
+
+def audio_profile_uuids() -> tuple[str, ...]:
+    """128-bit form of the profiles this program refuses."""
+    return tuple(f"0000{short}-0000-1000-8000-00805f9b34fb" for short in _AUDIO_PROFILE_IDS)
+
 
 def normalize_phone(value: str) -> str:
     """Return E.164 (`+` and 8 to 15 digits) or an empty string.

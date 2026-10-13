@@ -19,7 +19,6 @@ Item {
   property string phoneAddress: ""
   property string ownNumber: ""
   property string pairCode: ""
-  property bool pairFallback: false
   property bool notifyBody: false
   property bool bluetoothReady: false
   property string lastError: ""
@@ -78,7 +77,6 @@ Item {
     root.ownNumber = status.ownNumber || ""
     root.unread = Number(status.unread || 0)
     root.notifyBody = status.notifyBody === true
-    root.pairFallback = status.pairFallback === true
     root.bluetoothReady = status.bluetoothReady === true
     if (root.state !== "pairing")
       root.pairCode = ""

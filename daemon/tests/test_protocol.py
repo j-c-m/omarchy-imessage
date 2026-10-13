@@ -122,6 +122,18 @@ class PlainVCardTests(unittest.TestCase):
         self.assertEqual(people[0]["emails"], ["ada@example.com"])
 
 
+class AudioProfileTests(unittest.TestCase):
+    def test_headset_and_media_profiles_are_audio(self):
+        for short in ("1108", "1112", "111e", "111f", "110a", "110b", "110c", "110e", "110f"):
+            self.assertTrue(protocol.is_audio_profile(short))
+            self.assertTrue(protocol.is_audio_profile(f"0000{short}-0000-1000-8000-00805f9b34fb"))
+
+    def test_message_and_phone_book_profiles_are_not_audio(self):
+        self.assertFalse(protocol.is_audio_profile("00001132-0000-1000-8000-00805f9b34fb"))
+        self.assertFalse(protocol.is_audio_profile("0000112f-0000-1000-8000-00805f9b34fb"))
+        self.assertEqual(len(protocol.audio_profile_uuids()), 9)
+
+
 class PublicErrorTests(unittest.TestCase):
     def test_a_missing_file_is_not_a_missing_bluetooth_service(self):
         text = protocol.public_error(FileNotFoundError("No such file or directory: '/tmp/incoming.bmsg'"))
