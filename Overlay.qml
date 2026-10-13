@@ -533,39 +533,8 @@ Item {
     return cut
   }
 
-  function linkify(value) {
-    // The iPhone also links a bare host such as voterep.co/j237n.
-    // The address is escaped, so the message cannot add its own markup.
-    var text = String(value || "")
-    var tlds = "com|org|net|edu|gov|mil|int|io|co|app|dev|me|tv|ai|info|biz|us|uk|ca|au|de|fr|nl|se|no|fi|es|it|ch|at|be|nz|ie|eu|xyz|link|news|blog|online|site|store|tech|cloud|live|page|pro|gg|ly"
-    var pattern = new RegExp("(?:https?:\\/\\/|www\\.)[^\\s<>\"']+|(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+(?:" + tlds + ")(?:\\/[^\\s<>\"']*)?", "gi")
-    var out = ""
-    var last = 0
-    var match
-    while ((match = pattern.exec(text)) !== null) {
-      var prev = match.index > 0 ? text.charAt(match.index - 1) : ""
-      if (/[\w@]/.test(prev) && !/^(?:https?:\/\/|www\.)/i.test(match[0]))
-        continue
-      out += root.escapeHtml(text.slice(last, match.index))
-      var shown = root.trimUrl(match[0])
-      var href = /^https?:\/\//i.test(shown) ? shown : "https://" + shown
-      // A long address has no spaces. Rich text will not wrap it, and the
-      // layout pass then never finishes.
-      out += "<a href=\"" + root.escapeHtml(href) + "\">" + root.escapeHtml(root.breakLink(shown)) + "</a>"
-      out += root.escapeHtml(match[0].slice(shown.length))
-      last = match.index + match[0].length
-    }
-    out += root.escapeHtml(text.slice(last))
-    return out
-  }
-
-  function isEmojiCode(code) {
-    return (code >= 0xD800 && code <= 0xDFFF) || code === 0xFE0F || code === 0x200D || (code >= 0x2600 && code <= 0x27BF)
-  }
-
   function linkRanges(value) {
-    // Linear scans. The old rich-text anchor is what pegged the shell
-    // on a long address, so these ranges are only for underlines and clicks.
+    // Linear scans. A bare host such as voterep.co/j237n is a link too.
     var text = String(value || "")
     var ranges = []
     var pattern = /https?:\/\/[^\s<>"']+|www\.[^\s<>"']+/gi
@@ -601,42 +570,24 @@ Item {
     return ranges
   }
 
-  function hrefAt(value, index) {
-    var ranges = root.linkRanges(value)
-    for (var i = 0; i < ranges.length; i++) {
-      if (index >= ranges[i].start && index < ranges[i].end)
-        return ranges[i].href
-    }
-    return ""
-  }
-
-  function messageHtml(value) {
-    // Underlines, not anchors. Qt's link objects retrigger layout forever.
+  function styledMessage(value) {
+    // Text.StyledText draws the underline and the click target.
+    // Keep this off QTextDocument. A RichText anchor does not finish
+    // layout when the whole message is one long address.
     var text = String(value || "")
     var ranges = root.linkRanges(text)
     var out = ""
     var i = 0
-    var r = 0
-    while (i < text.length) {
-      if (r < ranges.length && i === ranges[r].start) {
-        out += "<u>" + root.escapeHtml(text.slice(ranges[r].start, ranges[r].end)) + "</u>"
-        i = ranges[r].end
-        r++
+    for (var r = 0; r < ranges.length; r++) {
+      if (ranges[r].start < i)
         continue
-      }
-      if (isEmojiCode(text.charCodeAt(i))) {
-        var run = ""
-        while (i < text.length && isEmojiCode(text.charCodeAt(i)) && !(r < ranges.length && i === ranges[r].start)) {
-          run += text.charAt(i)
-          i++
-        }
-        out += "<span style=\"font-family: 'Noto Color Emoji'\">" + run + "</span>"
-        continue
-      }
-      var ch = text.charAt(i)
-      out += ch === "\n" ? "<br/>" : root.escapeHtml(ch)
-      i++
+      out += root.escapeHtml(text.slice(i, ranges[r].start)).replace(/\n/g, "<br/>")
+      out += "<a href=\"" + root.escapeHtml(ranges[r].href) + "\">"
+      out += root.escapeHtml(text.slice(ranges[r].start, ranges[r].end))
+      out += "</a>"
+      i = ranges[r].end
     }
+    out += root.escapeHtml(text.slice(i)).replace(/\n/g, "<br/>")
     return out
   }
 
@@ -647,12 +598,12 @@ Item {
     Qt.openUrlExternally(target)
   }
 
-  function withEmojiFont(value, links) {
+  function withEmojiFont(value) {
     // The card font has no emoji pictures. Qt on this desktop has no
     // "families" fallback, so emoji are wrapped in the emoji font.
-    // Only an open message is linkified. A link in the conversation
-    // list, watched for hover, retriggers layout until the shell pegs.
-    var raw = links ? root.linkify(value) : root.escapeHtml(String(value || ""))
+    // A message that contains a link uses styledMessage instead. This
+    // span is RichText, and RichText does not finish a long address.
+    var raw = root.escapeHtml(String(value || ""))
     var out = ""
     var run = ""
     for (var i = 0; i < raw.length; i++) {
@@ -1141,78 +1092,29 @@ Item {
                       y: Style.space(7)
                       width: Math.min(measure.implicitWidth, Math.max(1, transcript.width * 0.62))
                       wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                      textFormat: Text.PlainText
-                      text: body
+                      // StyledText wraps a long address. RichText is only for
+                      // the emoji font, and only when the message has no link.
+                      readonly property bool linked: root.linkRanges(body).length > 0
+                      textFormat: linked ? Text.StyledText : Text.RichText
+                      text: linked ? root.styledMessage(body) : root.withEmojiFont(body)
                       color: direction === "out" ? root.selectedText : root.foreground
+                      linkColor: direction === "out" ? root.selectedText : root.foreground
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.body
 
-                      Repeater {
-                        model: bodyText.underlines
-                        delegate: Rectangle {
-                          x: modelData.x
-                          y: modelData.y
-                          width: modelData.w
-                          height: 1
-                          color: bodyText.color
-                        }
-                      }
-
-                      TextEdit {
-                        id: hit
-                        opacity: 0
-                        enabled: false
-                        width: bodyText.width
-                        height: bodyText.implicitHeight
-                        text: body
-                        textFormat: Text.PlainText
-                        wrapMode: bodyText.wrapMode
-                        readOnly: true
-                        cursorVisible: false
-                        activeFocusOnPress: false
-                        selectByMouse: false
-                        font.family: bodyText.font.family
-                        font.pixelSize: bodyText.font.pixelSize
-                      }
-
-                      property var underlines: []
-                      function refreshUnderlines() {
-                        if (width < 2)
-                          return
-                        var ranges = root.linkRanges(body)
-                        var drawn = []
-                        for (var r = 0; r < ranges.length; r++) {
-                          var pos = ranges[r].start
-                          var end = ranges[r].end
-                          while (pos < end) {
-                            var rect = hit.positionToRectangle(pos)
-                            var lineY = rect.y
-                            var linePos = pos
-                            var right = rect.x
-                            while (linePos < end) {
-                              var step = hit.positionToRectangle(linePos)
-                              if (linePos > pos && Math.abs(step.y - lineY) > 1)
-                                break
-                              right = step.x + Math.max(step.width, 1)
-                              linePos++
-                            }
-                            drawn.push({ x: rect.x, y: rect.y + rect.height - 1, w: Math.max(1, right - rect.x) })
-                            if (linePos <= pos)
-                              break
-                            pos = linePos
-                          }
-                        }
-                        underlines = drawn
-                      }
-                      onWidthChanged: Qt.callLater(refreshUnderlines)
-                      Component.onCompleted: Qt.callLater(refreshUnderlines)
-
                       MouseArea {
                         anchors.fill: parent
+                        hoverEnabled: true
+                        onPositionChanged: function(mouse) {
+                          cursorShape = bodyText.linkAt(mouse.x, mouse.y) ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        }
+                        onExited: cursorShape = Qt.ArrowCursor
                         onClicked: function(mouse) {
-                          var link = root.hrefAt(body, hit.positionAt(mouse.x, mouse.y))
+                          var link = bodyText.linkAt(mouse.x, mouse.y)
                           if (link)
                             root.openLink(link)
+                          else
+                            mouse.accepted = false
                         }
                       }
                     }
