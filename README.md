@@ -45,7 +45,7 @@ omarchy restart shell
 
 1. Open the card. It looks for phones that are already paired. Highlight your iPhone and press Enter.
 2. A code appears here and on the phone. Press `y` here and confirm the same code on the phone. Press `n` to reject it.
-3. If pairing stops on its own, press `p`. That pairs again. It bonds the phone and does not connect this computer as a headset or a speaker. On some adapters the bond is Classic Bluetooth only, which is still enough for texts.
+3. If pairing stops on its own, press `p`. Enter connects and pairs. `p` pairs without that connect. On some adapters `p` only bonds Classic Bluetooth, which is still enough for texts. Either way this computer does not stay connected as a headset or a speaker.
 4. On the iPhone open **Settings → Bluetooth**, tap the **i** next to this computer, and turn on both switches in the picture. The phone may label the first one **Show Notifications** or **Show Message Notifications**. The second is **Sync Contacts**. They can take a minute to appear. If you see two entries with the same computer name, check both, then use this one.
 
 ![iPhone Bluetooth page for a computer named omarchy, with Show Notifications and Sync Contacts switched on.](docs/iphone-bluetooth-settings.jpg)

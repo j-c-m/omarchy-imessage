@@ -25,17 +25,19 @@ It does not connect as a headset or a speaker. It does not change the adapter cl
 
 MAP `1132`, the MAP notification channel, and PBAP `112f` are allowed. Other non-audio UUIDs are allowed so the pairing handshake can finish.
 
-The pairing agent is registered only during `pair()`. It is not the default agent for the whole session, so pairing a headset in the desktop settings still works while this plugin is loaded.
+The pairing agent is the default agent only while a phone is being paired or the radio link is being brought up. It is not held for the whole session, so pairing a headset in the desktop settings still works while this plugin is loaded.
 
 The phone is not marked `Trusted`. Trust is what lets BlueZ attach every profile later with no question. Startup clears `Trusted` on the saved phone.
 
 ## How the link comes up
 
-Enter and `p` both call `Pair()` when the phone is not bonded, then open MAP and PBAP. Neither calls `Device1.Connect` or `Device1.Disconnect`. Those calls attach every profile the desktop has registered, including A2DP and HFP.
+Enter uses `Device1.Connect` when the phone is not bonded yet. That is what makes iOS finish pairing and publish the message service. `p` calls `Pair()` when that connect stops. On some adapters `Pair()` only bonds Classic Bluetooth, which is still enough for texts.
 
-If MAP fails because the service record is missing, the phone is busy, or the phone has not allowed access, the program drops the OBEX session and tries `CreateSession` once more. If the ACL is down, that retry uses `ConnectProfile` for the MAP Message Access Server UUID `00001132-0000-1000-8000-00805f9b34fb` only.
+iOS does not publish MAP until the radio link is up. Before `CreateSession`, the program calls `Device1.Connect` if the phone is disconnected. The agent rejects audio profiles during that call, and `DisconnectProfile` drops any audio profile that still attaches. The computer does not stay connected as a headset or a speaker.
 
-A saved phone is reopened with MAP and PBAP when the daemon starts, so the bar can receive texts while the card is closed. That path does not connect audio.
+If MAP still fails because the service record is missing, the phone refused the channel, or it has not allowed access, the program brings the link up once more and tries `CreateSession` again.
+
+A saved phone is reopened the same way when the daemon starts, so the bar can receive texts while the card is closed.
 
 The ANCS advertisement stops when messages connect. If they are still down after 120 seconds, the advertisement stops. A new pair cancels the previous timer.
 

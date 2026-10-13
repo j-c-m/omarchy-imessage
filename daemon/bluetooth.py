@@ -25,7 +25,6 @@ from dbus_next.errors import DBusError
 from dbus_next.service import ServiceInterface, dbus_property, method
 
 from protocol import (
-    MAP_PROFILE_UUID,
     address_from_thread,
     audio_profile_uuids,
     classify_recipient,
@@ -366,10 +365,10 @@ class BluetoothSession:
     async def pair(self, address: str, explicit: bool) -> None:
         """Bond the phone, then open texts and contacts.
 
-        Enter and p both land here. `explicit` does not change the bond.
-        Neither path connects a headset or media profile.
+        Enter connects first, which is what makes iOS finish pairing.
+        p calls Pair() when that connect stops. Audio profiles are
+        rejected and dropped either way.
         """
-        del explicit
         async with self.lock:
             self._cancel_advert_stop()
             try:
@@ -381,7 +380,11 @@ class BluetoothSession:
                 except Exception:
                     bonded = False
                 if not bonded:
-                    await device.call_pair()
+                    if explicit:
+                        await device.call_pair()
+                    else:
+                        await device.call_connect()
+                        await self._drop_audio(address)
                 await self._untrust(address)
                 self.store.set_phone(address, name)
                 self.detail = "Paired. Waiting for the iPhone switches."
@@ -502,13 +505,28 @@ class BluetoothSession:
         except Exception:
             return False
 
-    async def _connect_map(self, address: str) -> None:
-        """Bring up the message channel only. This does not connect audio."""
-        try:
-            device = await self._device(address)
-            await device.call_connect_profile(MAP_PROFILE_UUID)
-        except Exception:
+    async def _bring_up_link(self, address: str) -> None:
+        """Connect the phone so it will offer the message service.
+
+        iOS does not publish MAP until the radio link is up. Device.Connect
+        is what completes that discovery. The agent rejects audio, and any
+        audio profile that still attaches is dropped before we return.
+        """
+        if await self._link_up(address):
+            await self._drop_audio(address)
             return
+        started_agent = not self._agent_on
+        try:
+            await self._register_agent()
+            device = await self._device(address)
+            try:
+                await device.call_connect()
+            except Exception:
+                pass
+        finally:
+            await self._drop_audio(address)
+            if started_agent:
+                await self._unregister_agent()
 
     async def _untrust(self, address: str) -> None:
         """Stop BlueZ from attaching every profile with no question."""
@@ -558,20 +576,27 @@ class BluetoothSession:
 
     async def _open_profiles(self, address: str, announce: bool, recover: bool = True) -> None:
         await self._ensure_obexd()
-        await self._drop_audio(address)
+        await self._bring_up_link(address)
         await self._close_profiles()
         client = await self._iface("org.bluez.obex", "/org/bluez/obex", "org.bluez.obex.Client1", self._session_bus)
         try:
             self._map_path = await client.call_create_session(address, {"Target": Variant("s", "map")})
         except Exception as exc:
             text = str(exc).lower()
-            # One retry. A missing record often means the phone has not
-            # offered the message channel yet. Do not reconnect every profile.
-            if recover and ("service record" in text or "0x43" in text or "busy" in text or "forbidden" in text):
+            # One retry after the radio link is up. iOS hides MAP until then.
+            retry = (
+                "service record" in text
+                or "0x43" in text
+                or "busy" in text
+                or "forbidden" in text
+                or "connection refused" in text
+                or "errno 111" in text
+                or "host is down" in text
+            )
+            if recover and retry:
                 await self._close_profiles()
                 await asyncio.sleep(1.2)
-                if not await self._link_up(address):
-                    await self._connect_map(address)
+                await self._bring_up_link(address)
                 await self._open_profiles(address, announce, recover=False)
                 return
             message = public_error(exc)

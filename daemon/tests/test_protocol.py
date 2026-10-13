@@ -135,6 +135,10 @@ class AudioProfileTests(unittest.TestCase):
 
 
 class PublicErrorTests(unittest.TestCase):
+    def test_a_missing_message_service_asks_for_the_iphone_switch(self):
+        text = protocol.public_error(RuntimeError("Unable to find service record"))
+        self.assertIn("Show Message Notifications", text)
+
     def test_a_missing_file_is_not_a_missing_bluetooth_service(self):
         text = protocol.public_error(FileNotFoundError("No such file or directory: '/tmp/incoming.bmsg'"))
         self.assertNotIn("bluez-obex", text)

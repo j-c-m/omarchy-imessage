@@ -34,10 +34,6 @@ _AUDIO_PROFILE_IDS = (
     "110f",  # AVRCP controller
 )
 
-# Message Access Server. The phone hosts it. This program connects to it.
-MAP_PROFILE_UUID = "00001132-0000-1000-8000-00805f9b34fb"
-
-
 def _profile_id(uuid: str) -> str:
     """16-bit Bluetooth profile id from a short or 128-bit UUID."""
     hexes = re.sub(r"[^0-9a-f]", "", (uuid or "").lower())
@@ -378,7 +374,12 @@ def public_error(exc: BaseException) -> str:
     """
     text = str(exc)
     lowered = text.lower()
-    if "forbidden" in lowered or "0x43" in lowered or "not authorized" in lowered:
+    if (
+        "forbidden" in lowered
+        or "0x43" in lowered
+        or "not authorized" in lowered
+        or "service record" in lowered
+    ):
         return "The iPhone has not allowed message access yet. Turn on Show Message Notifications."
     if "connection refused" in lowered or "errno 111" in lowered or "host is down" in lowered:
         return "The phone is already in a message session with another computer, or it is out of range."
