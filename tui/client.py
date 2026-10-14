@@ -20,7 +20,20 @@ class SocketClient:
         self.writer = writer
 
     def send(self, command: dict) -> None:
-        self.writer.write((json.dumps(command, ensure_ascii=False) + "\n").encode())
+        # Keys pressed while the daemon is down are dropped, not queued:
+        # replaying a stale pair or scan after a reconnect would surprise.
+        if self.writer.is_closing():
+            return
+        try:
+            self.writer.write((json.dumps(command, ensure_ascii=False) + "\n").encode())
+        except (ConnectionError, OSError):
+            pass
+
+    def close(self) -> None:
+        try:
+            self.writer.close()
+        except (OSError, RuntimeError):
+            pass
 
     async def lines(self):
         while True:

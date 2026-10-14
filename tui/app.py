@@ -25,6 +25,7 @@ from tui.client import connect
 from tui.render import link_spans
 
 HINT = "j/k move    enter open    r reply    n new    ctrl+d delete    / filter    t notification text    esc back"
+RECONNECT_DELAY = 1.0
 PHONE_HINT = "j/k move    enter pair    p other pairing    / filter    esc back"
 CODE_HINT = "y accept    n reject    esc cancel"
 
@@ -288,10 +289,40 @@ class ImsgApp(App):
             except OSError as exc:
                 self.exit(message=str(exc))
                 return
+        while True:
+            self._subscribe()
+            try:
+                async for event in self.client.lines():
+                    self.apply(event)
+            except OSError:
+                pass
+            # The daemon went away, usually a shell restart. Stay up and
+            # reconnect instead of going deaf.
+            self._set_status("Reconnecting...")
+            await self._reconnect()
+
+    def _subscribe(self) -> None:
+        """Ask the daemon for everything this screen currently shows."""
         self.client.send({"cmd": "status"})
         self.client.send({"cmd": "threads"})
-        async for event in self.client.lines():
-            self.apply(event)
+        if self.open_key:
+            self.client.send({"cmd": "messages", "thread": self.open_key})
+        if self.mode == "contacts":
+            self.client.send({"cmd": "contacts", "query": self.filter_text})
+        elif self.mode == "phones":
+            self.client.send({"cmd": "devices"})
+
+    async def _reconnect(self) -> None:
+        while True:
+            try:
+                fresh = await connect(self.standalone)
+            except OSError:
+                await asyncio.sleep(RECONNECT_DELAY)
+                continue
+            old, self.client = self.client, fresh
+            if old is not None:
+                old.close()
+            return
 
     def apply(self, event: dict) -> None:
         kind = event.get("event")

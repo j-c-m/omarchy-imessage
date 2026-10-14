@@ -42,6 +42,7 @@ class QueueClient:
     def __init__(self) -> None:
         self.sent = []
         self.queue: asyncio.Queue = asyncio.Queue()
+        self.closed = False
 
     def send(self, command: dict) -> None:
         self.sent.append(command)
@@ -55,6 +56,9 @@ class QueueClient:
 
     async def push(self, event: dict) -> None:
         await self.queue.put(event)
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class ThemeTests(unittest.TestCase):
@@ -454,6 +458,50 @@ class PairTests(unittest.IsolatedAsyncioTestCase):
         ])
         self.assertIn({"cmd": "cancel"}, client.sent)
         self.assertEqual(app.pair_code, "")
+
+
+class ReconnectTests(unittest.IsolatedAsyncioTestCase):
+    async def test_a_dropped_daemon_reconnects_and_reloads(self):
+        from unittest import mock
+
+        first = QueueClient()
+        second = QueueClient()
+        attempts: list[bool] = []
+
+        async def fake_connect(standalone: bool = False):
+            attempts.append(standalone)
+            if len(attempts) < 3:
+                raise OSError("daemon is restarting")
+            return second
+
+        app = ImsgApp(client=first)
+        threads = [{"key": "tel:+15550001111", "label": "Ada", "unread": 0, "preview": "hi"}]
+        with (
+            mock.patch("tui.app.connect", fake_connect),
+            mock.patch("tui.app.RECONNECT_DELAY", 0),
+        ):
+            async with app.run_test(size=(100, 24)) as pilot:
+                await first.push({"event": "threads", "threads": threads})
+                await pilot.pause()
+                await pilot.press("enter")
+                await pilot.pause()
+                self.assertEqual(app.open_key, "tel:+15550001111")
+                await first.push(None)  # daemon died; the stream ends
+                for _ in range(200):
+                    if app.client is second:
+                        break
+                    await asyncio.sleep(0.01)
+                self.assertIs(app.client, second)
+                await second.push({"event": "threads", "threads": threads})
+                await pilot.pause()
+                self.assertEqual(app.threads, threads)
+        # Two failures retried, then the fresh connection resubscribed.
+        self.assertEqual(attempts, [False, False, False])
+        self.assertTrue(first.closed)
+        commands = [(item["cmd"], item.get("thread", "")) for item in second.sent]
+        self.assertIn(("status", ""), commands)
+        self.assertIn(("threads", ""), commands)
+        self.assertIn(("messages", "tel:+15550001111"), commands)
 
 
 if __name__ == "__main__":
