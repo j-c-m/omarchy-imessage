@@ -532,9 +532,33 @@ class ComposerTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertTrue(composer.display)
             self.assertEqual(composer.text, "")
-            self.assertTrue(app.query_one("#threads", ThreadList).has_focus)
+            self.assertTrue(composer.has_focus)
         sends = [item for item in client.sent if item["cmd"] == "send"]
         self.assertEqual(sends[-1]["body"], "hi\nyo")
+
+    async def test_send_keeps_the_box_active_until_escape(self):
+        client = QueueClient()
+        app = ImsgApp(client=client)
+        async with app.run_test(size=(100, 24)) as pilot:
+            composer = await self._open_reply(app, client, pilot)
+            await pilot.press("h", "i")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertEqual(composer.text, "")
+            self.assertTrue(composer.has_focus)
+            await pilot.press("y", "o")
+            await pilot.pause()
+            self.assertEqual(composer.text, "yo")
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertEqual(composer.text, "")
+            self.assertTrue(composer.has_focus)
+            await pilot.press("escape")
+            await pilot.pause()
+            self.assertTrue(app.query_one("#threads", ThreadList).has_focus)
+        sends = [item for item in client.sent if item["cmd"] == "send"]
+        self.assertEqual([item["body"] for item in sends], ["hi", "yo"])
 
     async def test_ctrl_j_inserts_a_newline_where_shift_enter_is_missing(self):
         client = QueueClient()

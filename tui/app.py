@@ -613,7 +613,11 @@ class ImsgApp(App):
             self._hint("open a conversation first (enter)")
             return
         self.client.send(command)
-        self.action_close_compose()
+        # The box stays active until clicked out: clear the sent text
+        # but keep the focus so the next message can be typed at once.
+        # Escape still leaves the box through action_close_compose.
+        composer.clear()
+        composer.focus()
 
     def action_delete_thread(self) -> None:
         if self._typing() or self.mode != "threads":
