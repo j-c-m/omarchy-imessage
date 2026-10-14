@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import sys
 
 from hub import Hub, socket_path
@@ -23,7 +24,7 @@ from store import Store
 
 hub = Hub()
 
-_MAC = __import__("re").compile(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
+_MAC = re.compile(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
 
 
 # The event loop keeps only a weak reference to tasks. Without this set,

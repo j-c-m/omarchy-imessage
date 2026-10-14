@@ -23,6 +23,9 @@ class Hub:
         self.writers: list[asyncio.StreamWriter] = []
         self.on_line = None
         self.server: asyncio.Server | None = None
+        # The event loop keeps only a weak reference to tasks. Without
+        # this set, a drain can be garbage-collected before it finishes.
+        self._drains: set[asyncio.Task] = set()
 
     def publish(self, event: dict) -> None:
         text = json.dumps(event, ensure_ascii=False) + "\n"
@@ -35,9 +38,12 @@ class Hub:
                 continue
             writer.write(data)
             try:
-                asyncio.get_running_loop().create_task(self._drain(writer))
+                task = asyncio.get_running_loop().create_task(self._drain(writer))
             except RuntimeError:
                 pass
+            else:
+                self._drains.add(task)
+                task.add_done_callback(self._drains.discard)
 
     async def _drain(self, writer: asyncio.StreamWriter) -> None:
         try:

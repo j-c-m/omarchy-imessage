@@ -8,7 +8,6 @@ plugin never asks for one.
 
 from __future__ import annotations
 
-import json
 import os
 import sqlite3
 import time
@@ -236,7 +235,7 @@ class Store:
         has_attachment: bool,
         body_complete: bool,
         peer_label: str = "",
-    ) -> tuple[dict, bool]:
+    ) -> tuple[dict | None, bool]:
         """Insert or update one text. Returns the row and whether it was new.
 
         A text from a conversation you deleted stays deleted. A later new

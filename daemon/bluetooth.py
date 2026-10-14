@@ -27,6 +27,7 @@ from dbus_next.service import ServiceInterface, dbus_property, method
 from protocol import (
     address_from_thread,
     audio_profile_uuids,
+    build_bmessage,
     classify_recipient,
     coerce_phone,
     connected_status,
@@ -152,7 +153,8 @@ class PairAgent(ServiceInterface):
             pending.set_exception(DBusError("org.bluez.Error.Rejected", "user rejected"))
 
     def _begin_wait(self, code: str) -> asyncio.Future:
-        self.answer(False) if self._pending else None
+        if self._pending:
+            self.answer(False)
         loop = asyncio.get_running_loop()
         self._pending = loop.create_future()
         self._on_code(code)
@@ -203,9 +205,6 @@ class PairAgent(ServiceInterface):
         if is_audio_profile(str(uuid)):
             raise DBusError("org.bluez.Error.Rejected", "audio profiles are not used")
         return
-
-    def _reject_if_waiting(self):
-        self.answer(False)
 
 
 class SolicitationAdvert(ServiceInterface):
@@ -471,12 +470,10 @@ class BluetoothSession:
             if not self._map_path:
                 raise RuntimeError("The phone is not connected for messages yet.")
             own = self.store.settings()["ownNumber"]
-            kind, value = classify_recipient(address, own)
+            _, value = classify_recipient(address, own)
             # build happens in the caller via protocol so a bad body fails
             # before we touch Bluetooth. Re-check here as the gate.
-            from protocol import build_bmessage
-
-            payload = build_bmessage(value if kind == "email" else value, body, own)
+            payload = build_bmessage(value, body, own)
             folder = runtime_dir()
             path = folder / "outgoing.bmsg"
             fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -1225,8 +1222,6 @@ class BluetoothSession:
                 continue
             name = str(props.get("Name") or props.get("Alias") or "")
             icon = str(props.get("Icon") or "")
-            if icon != "phone" and "iphone" not in name.lower() and not props.get("Paired"):
-                continue
             if icon != "phone" and "iphone" not in name.lower():
                 continue
             found.append(

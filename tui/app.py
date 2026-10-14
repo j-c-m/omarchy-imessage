@@ -13,6 +13,8 @@ import json
 import socket
 import sys
 
+from rich.cells import cell_len
+from rich.console import Console
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -755,8 +757,6 @@ def render_message(message: dict, width: int = 0) -> Text:
     block.append(body)
     # Pad every line to the widest line so the background is one rectangle.
     # Sent rectangles sit on the right. A short column cannot hold the time.
-    from rich.cells import cell_len
-    from rich.console import Console
     wrap_at = width if width >= 5 else 10000
     lines = block.wrap(Console(width=wrap_at), wrap_at, overflow="fold")
     box = 0
