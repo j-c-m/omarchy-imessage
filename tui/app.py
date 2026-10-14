@@ -24,6 +24,8 @@ from textual.widgets.option_list import Option
 from tui.client import connect
 from tui.render import link_spans
 
+from protocol import MAX_BODY_CHARS
+
 HINT = "j/k move    enter open    r reply    n new    ctrl+d delete    / filter    t notification text    esc back"
 RECONNECT_DELAY = 1.0
 PHONE_HINT = "j/k move    enter pair    p other pairing    / filter    esc back"
@@ -61,17 +63,23 @@ class Composer(TextArea):
     MAX_LINES = 5
     BINDINGS = [
         Binding("enter", "submit", "send", priority=True),
+        Binding("shift+enter", "newline", "newline", priority=True),
+        Binding("ctrl+j", "newline", "newline", priority=True),
         Binding("escape", "cancel", "cancel", priority=True),
     ]
 
     def action_submit(self) -> None:
         self.app.action_send()
 
+    def action_newline(self) -> None:
+        self.insert("\n")
+
     def action_cancel(self) -> None:
         self.app.action_close_compose()
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         self._fit_lines()
+        self.border_subtitle = f"{len(self.text)}/{MAX_BODY_CHARS}"
 
     def _on_resize(self) -> None:
         super()._on_resize()
@@ -79,9 +87,10 @@ class Composer(TextArea):
 
     def _fit_lines(self) -> None:
         lines = min(self.MAX_LINES, max(1, self.wrapped_document.height))
-        if self.styles.height is not None and self.styles.height.cells == lines:
+        height = lines + 2  # round border above and below the text
+        if self.styles.height is not None and self.styles.height.cells == height:
             return
-        self.styles.height = lines
+        self.styles.height = height
 
 
 class Transcript(RichLog):
@@ -145,13 +154,13 @@ class ImsgApp(App):
         height: 1fr;
     }
     #composer {
-        height: 1;
-        max-height: 5;
-        border: none;
+        height: 3;
+        max-height: 7;
+        border: round ansi_bright_black;
         padding: 0 1;
         scrollbar-size-vertical: 1;
         &:focus {
-            border: none;
+            border: round ansi_blue;
         }
     }
     """
@@ -206,14 +215,14 @@ class ImsgApp(App):
             yield ThreadList(id="threads")
             with Vertical(id="stack"):
                 yield Transcript(id="transcript", wrap=True, markup=False, min_width=8, auto_scroll=True)
-                yield Composer("", id="composer", show_line_numbers=False, compact=True)
+                yield Composer("", id="composer", show_line_numbers=False)
         yield Static("", classes="bar-gap")
         yield Static(HINT, id="hint")
 
     def on_mount(self) -> None:
         composer = self.query_one("#composer", Composer)
-        composer.display = False
-        composer.can_focus = False
+        composer.border_title = "Message"
+        composer.border_subtitle = f"0/{MAX_BODY_CHARS}"
         box = self.query_one("#filter", Input)
         box.display = False
         box.can_focus = False
@@ -267,9 +276,7 @@ class ImsgApp(App):
         if thread:
             self.launch_thread = thread
             self.mode = "threads"
-            composer = self.query_one("#composer", Composer)
-            if composer.display:
-                self.action_close_compose()
+            self.action_close_compose()
             if self.filter_on:
                 self.filter_on = False
                 self.filter_text = ""
@@ -455,8 +462,6 @@ class ImsgApp(App):
                 break
         if self.shown:
             widget.highlighted = restore
-            if not self.query_one("#composer").display and not self.filter_on:
-                widget.focus()
         self._filling = False
 
     def _current(self) -> dict | None:
@@ -567,28 +572,43 @@ class ImsgApp(App):
 
     def _open_composer(self) -> None:
         composer = self.query_one("#composer", Composer)
-        composer.display = True
-        composer.can_focus = True
+        composer.border_title = "New message" if self.compose_address else "Reply"
+        composer.border_subtitle = f"{len(composer.text)}/{MAX_BODY_CHARS}"
+        self._hint("enter send    shift+enter newline    esc cancel")
         composer.focus()
 
     def action_close_compose(self) -> None:
         composer = self.query_one("#composer", Composer)
-        composer.display = False
-        composer.can_focus = False
         composer.clear()
         self.query_one("#threads", ThreadList).focus()
+        self._hint_for_mode()
 
     def action_send(self) -> None:
         composer = self.query_one("#composer", Composer)
         body = composer.text.strip()
         if not body:
             return
-        command = {"cmd": "send", "body": body}
+        if len(body) > MAX_BODY_CHARS:
+            self._hint(f"too long to send ({len(body)}/{MAX_BODY_CHARS})")
+            return
+        # The box is always visible, so it can hold text with no target:
+        # a fresh screen, or a mode with no conversation. A target from
+        # another mode is stale and must not receive the text.
+        thread = self.open_key if self.mode == "threads" else ""
+        if not thread and not self.compose_address and self.mode == "threads":
+            row = self._current()
+            if row and row.get("key"):
+                thread = row["key"]
         if self.compose_address:
-            command["address"] = self.compose_address
-        elif self.open_key:
-            command["thread"] = self.open_key
+            command = {"cmd": "send", "body": body, "address": self.compose_address}
+            self.compose_address = ""
+        elif thread:
+            command = {"cmd": "send", "thread": thread, "body": body}
+            if not self.open_key:
+                self.open_key = thread
+                self.client.send({"cmd": "messages", "thread": thread})
         else:
+            self._hint("open a conversation first (enter)")
             return
         self.client.send(command)
         self.action_close_compose()
@@ -606,7 +626,7 @@ class ImsgApp(App):
         self.client.send({"cmd": "delete-thread", "thread": key})
 
     def action_filter(self) -> None:
-        if self.query_one("#composer").display:
+        if self.query_one("#composer").has_focus:
             return
         box = self.query_one("#filter", Input)
         self.filter_on = True
@@ -626,7 +646,7 @@ class ImsgApp(App):
             self._show_threads()
 
     def action_back(self) -> None:
-        if self.query_one("#composer").display:
+        if self.query_one("#composer").has_focus:
             self.action_close_compose()
             return
         if self.filter_on:

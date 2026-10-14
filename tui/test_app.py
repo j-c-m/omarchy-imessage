@@ -12,7 +12,7 @@ try:
 except ImportError:  # pragma: no cover
     raise unittest.SkipTest("textual is not installed")
 
-from tui.app import Composer, ImsgApp, Transcript, render_message
+from tui.app import HINT, Composer, ImsgApp, ThreadList, Transcript, render_message
 
 
 def _background_columns(text, prefix: str) -> list[list[int]]:
@@ -320,21 +320,22 @@ class OpenTests(unittest.IsolatedAsyncioTestCase):
             await pilot.press("r")
             await pilot.pause()
             composer = app.query_one("#composer", Composer)
-            self.assertEqual(composer.region.height, 1)
+            self.assertEqual(composer.region.height, 3)
             self.assertEqual(composer.content_region.height, 1)
             width = composer.wrap_width
             self.assertGreater(width, 5)
             composer.insert("x" * (width + 1))
             await pilot.pause()
-            self.assertGreater(composer.region.height, 1)
-            self.assertLessEqual(composer.region.height, Composer.MAX_LINES)
+            self.assertGreater(composer.content_region.height, 1)
+            self.assertLessEqual(composer.region.height, Composer.MAX_LINES + 2)
             composer.insert("x" * (width * 8))
             await pilot.pause()
-            self.assertEqual(composer.region.height, Composer.MAX_LINES)
+            self.assertEqual(composer.region.height, Composer.MAX_LINES + 2)
+            self.assertEqual(composer.content_region.height, Composer.MAX_LINES)
             self.assertGreater(composer.wrapped_document.height, Composer.MAX_LINES)
             composer.clear()
             await pilot.pause()
-            self.assertEqual(composer.region.height, 1)
+            self.assertEqual(composer.region.height, 3)
 
 
 class PairTests(unittest.IsolatedAsyncioTestCase):
@@ -502,6 +503,176 @@ class ReconnectTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(("status", ""), commands)
         self.assertIn(("threads", ""), commands)
         self.assertIn(("messages", "tel:+15550001111"), commands)
+
+
+class ComposerTests(unittest.IsolatedAsyncioTestCase):
+    async def _open_reply(self, app, client, pilot):
+        await client.push({
+            "event": "threads",
+            "threads": [{"key": "tel:+15550001111", "label": "Ada", "unread": 0, "preview": "hi"}],
+        })
+        await pilot.pause()
+        await pilot.press("r")
+        await pilot.pause()
+        return app.query_one("#composer", Composer)
+
+    async def test_shift_enter_inserts_a_newline_and_enter_sends(self):
+        client = QueueClient()
+        app = ImsgApp(client=client)
+        async with app.run_test(size=(100, 24)) as pilot:
+            composer = await self._open_reply(app, client, pilot)
+            await pilot.press("h", "i")
+            await pilot.pause()
+            await pilot.press("shift+enter")
+            await pilot.pause()
+            await pilot.press("y", "o")
+            await pilot.pause()
+            self.assertEqual(composer.text, "hi\nyo")
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertTrue(composer.display)
+            self.assertEqual(composer.text, "")
+            self.assertTrue(app.query_one("#threads", ThreadList).has_focus)
+        sends = [item for item in client.sent if item["cmd"] == "send"]
+        self.assertEqual(sends[-1]["body"], "hi\nyo")
+
+    async def test_ctrl_j_inserts_a_newline_where_shift_enter_is_missing(self):
+        client = QueueClient()
+        app = ImsgApp(client=client)
+        async with app.run_test(size=(100, 24)) as pilot:
+            composer = await self._open_reply(app, client, pilot)
+            await pilot.press("a")
+            await pilot.pause()
+            await pilot.press("ctrl+j")
+            await pilot.pause()
+            self.assertEqual(composer.text, "a\n")
+            self.assertTrue(composer.display)
+
+    async def test_a_too_long_message_is_blocked_with_a_count(self):
+        client = QueueClient()
+        app = ImsgApp(client=client)
+        async with app.run_test(size=(100, 24)) as pilot:
+            composer = await self._open_reply(app, client, pilot)
+            composer.insert("x" * 1001)
+            await pilot.pause()
+            self.assertEqual(str(composer.border_subtitle), "1001/1000")
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertNotIn("send", [item["cmd"] for item in client.sent])
+            self.assertTrue(composer.display)
+            self.assertIn("too long", str(app.query_one("#hint").content))
+
+    async def test_composer_shows_title_hint_and_counter(self):
+        client = QueueClient()
+        app = ImsgApp(client=client)
+        async with app.run_test(size=(100, 24)) as pilot:
+            composer = await self._open_reply(app, client, pilot)
+            self.assertEqual(str(composer.border_title), "Reply")
+            self.assertEqual(str(composer.border_subtitle), "0/1000")
+            self.assertEqual(
+                str(app.query_one("#hint").content),
+                "enter send    shift+enter newline    esc cancel",
+            )
+            await pilot.press("escape")
+            await pilot.pause()
+            self.assertTrue(composer.display)
+            self.assertEqual(composer.text, "")
+            self.assertTrue(app.query_one("#threads", ThreadList).has_focus)
+            self.assertEqual(str(app.query_one("#hint").content), HINT)
+
+    async def test_reply_targets_the_open_conversation(self):
+        client = QueueClient()
+        app = ImsgApp(client=client)
+        async with app.run_test(size=(100, 24)) as pilot:
+            await client.push({
+                "event": "threads",
+                "threads": [{"key": "tel:+15550001111", "label": "Ada", "unread": 0, "preview": "hi"}],
+            })
+            await pilot.pause()
+            self.assertEqual(app.open_key, "tel:+15550001111")
+            await pilot.press("r")
+            await pilot.pause()
+            await pilot.press("y", "o")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+        sends = [item for item in client.sent if item["cmd"] == "send"]
+        self.assertEqual(
+            sends[-1], {"cmd": "send", "thread": "tel:+15550001111", "body": "yo"}
+        )
+
+    async def test_send_with_cleared_open_key_falls_back_to_highlight(self):
+        client = QueueClient()
+        app = ImsgApp(client=client)
+        async with app.run_test(size=(100, 24)) as pilot:
+            await client.push({
+                "event": "threads",
+                "threads": [{"key": "tel:+15550001111", "label": "Ada", "unread": 0, "preview": "hi"}],
+            })
+            await pilot.pause()
+            app.open_key = ""
+            composer = app.query_one("#composer", Composer)
+            composer.focus()
+            await pilot.pause()
+            composer.insert("yo")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertEqual(app.open_key, "tel:+15550001111")
+        sends = [item for item in client.sent if item["cmd"] == "send"]
+        self.assertEqual(
+            sends[-1], {"cmd": "send", "thread": "tel:+15550001111", "body": "yo"}
+        )
+        loads = [item for item in client.sent if item["cmd"] == "messages"]
+        self.assertIn({"cmd": "messages", "thread": "tel:+15550001111"}, loads)
+
+    async def test_send_with_no_conversation_keeps_the_text(self):
+        client = QueueClient()
+        app = ImsgApp(client=client)
+        async with app.run_test(size=(100, 24)) as pilot:
+            composer = app.query_one("#composer", Composer)
+            composer.focus()
+            await pilot.pause()
+            composer.insert("hello?")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertNotIn("send", [item["cmd"] for item in client.sent])
+            self.assertEqual(composer.text, "hello?")
+            self.assertIn("open a conversation", str(app.query_one("#hint").content))
+
+    async def test_phones_mode_never_sends_to_a_stale_thread(self):
+        client = QueueClient()
+        app = ImsgApp(client=client)
+        async with app.run_test(size=(100, 24)) as pilot:
+            app.open_key = "tel:+15550001111"
+            app.mode = "phones"
+            composer = app.query_one("#composer", Composer)
+            composer.focus()
+            await pilot.pause()
+            composer.insert("hi")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertNotIn("send", [item["cmd"] for item in client.sent])
+            self.assertEqual(composer.text, "hi")
+
+    async def test_a_new_message_titles_the_box_differently(self):
+        client = QueueClient()
+        app = ImsgApp(client=client)
+        async with app.run_test(size=(100, 24)) as pilot:
+            await pilot.press("n")
+            await pilot.pause()
+            await client.push({
+                "event": "contacts",
+                "contacts": [{"name": "Ada", "address": "+15550001111", "kind": "tel"}],
+            })
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            composer = app.query_one("#composer", Composer)
+            self.assertTrue(composer.display)
+            self.assertEqual(str(composer.border_title), "New message")
 
 
 if __name__ == "__main__":
