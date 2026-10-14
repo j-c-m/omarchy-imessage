@@ -257,6 +257,9 @@ class BluetoothSession:
         self._map_path = ""
         self._pbap_path = ""
         self._message_paths: dict[str, str] = {}
+        # Preview rows without a MAP handle share a timestamp-based id.
+        # The counter keeps two texts in the same second distinct.
+        self._preview_seq = 0
         # Handles whose download timed out, mapped to the monotonic time
         # when they may be tried again.
         self._stuck_gets: dict[str, float] = {}
@@ -698,22 +701,6 @@ class BluetoothSession:
         except Exception:
             listing = await access.call_list_messages("telecom/msg/inbox", {})
         entries = _listing_entries(listing)
-        # The folder argument is relative to the session's working
-        # directory, which this program never sets. When the subfolder
-        # path misses, the working directory itself may still list.
-        try:
-            current = await access.call_list_messages(
-                "", {"MaxCount": Variant("q", 40), "SubjectLength": Variant("y", 255)}
-            )
-            current_entries = _listing_entries(current)
-            seen = {_handle_from(path, fields) or path for path, fields in entries}
-            for item in current_entries:
-                key = _handle_from(item[0], item[1]) or item[0]
-                if key not in seen:
-                    seen.add(key)
-                    entries.append(item)
-        except Exception:
-            pass
         saved = 0
         for path, fields in entries:
             handle = _handle_from(path, fields)
@@ -783,7 +770,12 @@ class BluetoothSession:
         attached = message_has_file(fields, subject)
         if present_message(subject, False) == "attachment omitted":
             subject = ""
-        external_id = handle or f"preview-{_map_time(str(fields.get('Timestamp') or ''))}-{sender}"
+        if handle:
+            external_id = handle
+        else:
+            self._preview_seq += 1
+            stamp = _map_time(str(fields.get("Timestamp") or ""))
+            external_id = f"preview-{stamp}-{sender}-{self._preview_seq}"
         row, created = self.store.upsert_message(
             external_id=external_id,
             address=sender,
